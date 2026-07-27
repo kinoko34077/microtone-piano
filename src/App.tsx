@@ -254,11 +254,11 @@ export default function App() {
   }, [settings, currentLayout, currentTuning, pcPressedMap]);
 
   return (
-    <div className="relative flex flex-col h-screen w-screen overflow-hidden bg-[#0d1117] text-slate-100 font-sans">
+    <div className="app-shell relative flex flex-col overflow-hidden bg-[#0d1117] text-slate-100 font-sans">
       {/* フローティング・ハンバーガーメニューボタン */}
       <button
         onClick={() => setIsSidebarOpen(true)}
-        className="fixed top-2 right-2 z-30 p-2.5 bg-[#161b22]/90 hover:bg-[#21262d] rounded-lg border border-[#30363d] text-slate-200 shadow-2xl transition-all backdrop-blur-sm"
+        className="app-menu-button fixed z-30 p-2.5 bg-[#161b22]/90 hover:bg-[#21262d] rounded-lg border border-[#30363d] text-slate-200 shadow-2xl transition-all backdrop-blur-sm"
         title="設定・メニューを開く"
       >
         <Menu size={20} />
