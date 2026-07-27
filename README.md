@@ -17,6 +17,16 @@ Prerequisite: Node.js 20 or later.
 
 The app is configured with a relative Vite `base` path, so it can be hosted from a GitHub Pages project URL such as `https://<account>.github.io/<repo>/` without hardcoding the repository name.
 
+## PWA support
+
+The app now includes:
+
+- a web app manifest
+- installable app icons
+- a service worker for app-shell and asset caching
+
+After deploying the production build over HTTPS, supported browsers can install it as a standalone app.
+
 ### One-time GitHub setup
 
 1. Push this repository to GitHub.
