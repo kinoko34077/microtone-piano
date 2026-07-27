@@ -1,0 +1,6 @@
+{
+  "name": "多段微分音Web鍵盤",
+  "description": "通常鍵盤を最大8段に分割し、任意微分音高(EDO/cent/ratio/周波数)を割当て・演奏・編集できるブラウザWebアプリ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
