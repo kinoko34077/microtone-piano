@@ -18,6 +18,7 @@ interface VoiceNode {
   isSustained: boolean;
   isReleased: boolean;
   startTime: number;
+  decayTimeoutId?: number;
 }
 
 export class AudioEngine {
@@ -27,6 +28,7 @@ export class AudioEngine {
   private maxPolyphony: number = 64;
   private soundSource: SoundSourceType = 'piano';
   private savedMasterVolume: number = 0.8;
+  private noteDecayMs: number = 0;
   private sustainLatch: boolean = false;
   private sustainMomentary: boolean = false;
   private onOutOfRangeCallback?: (notice: OutOfRangeNotice) => void;
@@ -80,6 +82,10 @@ export class AudioEngine {
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.01);
     }
+  }
+
+  public setNoteDecayMs(ms: number) {
+    this.noteDecayMs = Math.max(0, Math.floor(ms));
   }
 
   /**
@@ -252,6 +258,15 @@ export class AudioEngine {
       startTime: now,
     };
 
+    if (this.noteDecayMs > 0) {
+      const decayEndTime = now + attackTime + this.noteDecayMs / 1000;
+      voiceGain.gain.exponentialRampToValueAtTime(0.0001, decayEndTime);
+      voiceNode.decayTimeoutId = window.setTimeout(() => {
+        if (!this.activeVoices.has(voiceId) || !this.ctx) return;
+        this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
+      }, Math.ceil(attackTime * 1000 + this.noteDecayMs + 50));
+    }
+
     this.activeVoices.set(voiceId, voiceNode);
     return voiceId;
   }
@@ -308,6 +323,11 @@ export class AudioEngine {
   private stopVoiceNode(voiceId: string, now: number, releaseTime: number = 0.15) {
     const voice = this.activeVoices.get(voiceId);
     if (!voice || !this.ctx) return;
+
+    if (voice.decayTimeoutId !== undefined) {
+      window.clearTimeout(voice.decayTimeoutId);
+      voice.decayTimeoutId = undefined;
+    }
 
     const gain = voice.gainNode;
     gain.gain.cancelScheduledValues(now);

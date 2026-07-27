@@ -16,6 +16,7 @@ import { calculateFrequency, getPitchLabel, formatFrequency, resolvePitch } from
 import { applyAutoMapping } from '../../core/mapping';
 import { globalAudioEngine } from '../../core/audio';
 import { Plus, Minus, Trash2, Zap, Copy, Check, Music2, Sliders, Layers, Edit3, Type } from 'lucide-react';
+import { BlurCommitNumberInput } from '../BlurCommitNumberInput';
 
 interface PresetEditorProps {
   layout: LayoutPreset;
@@ -491,10 +492,10 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
 
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[10px] font-bold text-slate-400">割当オクターブ(周期)シフト:</span>
-                <input
-                  type="number"
+                <BlurCommitNumberInput
                   value={assignOctaveShift}
-                  onChange={(e) => setAssignOctaveShift(Number(e.target.value))}
+                  step={1}
+                  onCommit={(value) => setAssignOctaveShift(Math.trunc(value))}
                   className="w-16 px-1 py-0.5 bg-[#0d1117] text-slate-200 border border-[#30363d] rounded text-xs outline-none focus:border-sky-500"
                 />
               </div>
@@ -705,17 +706,18 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
                           {p.type === 'edo' && (
                             <div className="flex gap-2 items-center text-slate-300">
                               <span>EDO:</span>
-                              <input
-                                type="number"
+                              <BlurCommitNumberInput
                                 value={p.edo || 12}
-                                onChange={(e) => handleUpdatePitchItem({ ...p, edo: Number(e.target.value) })}
+                                step={1}
+                                min={1}
+                                onCommit={(value) => handleUpdatePitchItem({ ...p, edo: Math.max(1, Math.trunc(value)) })}
                                 className="w-16 px-1.5 py-0.5 bg-[#0d1117] text-slate-200 border border-[#30363d] focus:border-sky-500 rounded font-mono"
                               />
                               <span>Step:</span>
-                              <input
-                                type="number"
+                              <BlurCommitNumberInput
                                 value={p.step ?? 0}
-                                onChange={(e) => handleUpdatePitchItem({ ...p, step: Number(e.target.value) })}
+                                step={1}
+                                onCommit={(value) => handleUpdatePitchItem({ ...p, step: Math.trunc(value) })}
                                 className="w-16 px-1.5 py-0.5 bg-[#0d1117] text-slate-200 border border-[#30363d] focus:border-sky-500 rounded font-mono"
                               />
                             </div>
@@ -723,28 +725,29 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
                           {p.type === 'cents' && (
                             <div className="flex gap-2 items-center text-slate-300">
                               <span>Cent:</span>
-                              <input
-                                type="number"
-                                step="0.1"
+                              <BlurCommitNumberInput
                                 value={p.cents ?? 0}
-                                onChange={(e) => handleUpdatePitchItem({ ...p, cents: Number(e.target.value) })}
+                                step="0.1"
+                                onCommit={(value) => handleUpdatePitchItem({ ...p, cents: value })}
                                 className="w-24 px-1.5 py-0.5 bg-[#0d1117] text-slate-200 border border-[#30363d] focus:border-sky-500 rounded font-mono"
                               />
                             </div>
                           )}
                           {p.type === 'ratio' && (
                             <div className="flex gap-1 items-center text-slate-300">
-                              <input
-                                type="number"
+                              <BlurCommitNumberInput
                                 value={p.numerator || 1}
-                                onChange={(e) => handleUpdatePitchItem({ ...p, numerator: Number(e.target.value) })}
+                                step={1}
+                                min={1}
+                                onCommit={(value) => handleUpdatePitchItem({ ...p, numerator: Math.max(1, Math.trunc(value)) })}
                                 className="w-14 px-1.5 py-0.5 bg-[#0d1117] text-slate-200 border border-[#30363d] focus:border-sky-500 rounded font-mono"
                               />
                               <span>/</span>
-                              <input
-                                type="number"
+                              <BlurCommitNumberInput
                                 value={p.denominator || 1}
-                                onChange={(e) => handleUpdatePitchItem({ ...p, denominator: Number(e.target.value) })}
+                                step={1}
+                                min={1}
+                                onCommit={(value) => handleUpdatePitchItem({ ...p, denominator: Math.max(1, Math.trunc(value)) })}
                                 className="w-14 px-1.5 py-0.5 bg-[#0d1117] text-slate-200 border border-[#30363d] focus:border-sky-500 rounded font-mono"
                               />
                             </div>
@@ -752,11 +755,11 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
                           {p.type === 'frequency' && (
                             <div className="flex gap-2 items-center text-slate-300">
                               <span>Hz:</span>
-                              <input
-                                type="number"
-                                step="0.1"
+                              <BlurCommitNumberInput
                                 value={p.frequency ?? 440}
-                                onChange={(e) => handleUpdatePitchItem({ ...p, frequency: Number(e.target.value) })}
+                                step="0.1"
+                                min={0.1}
+                                onCommit={(value) => handleUpdatePitchItem({ ...p, frequency: Math.max(0.1, value) })}
                                 className="w-24 px-1.5 py-0.5 bg-[#0d1117] text-slate-200 border border-[#30363d] focus:border-sky-500 rounded font-mono"
                               />
                             </div>

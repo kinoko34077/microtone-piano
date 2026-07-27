@@ -16,6 +16,7 @@ const STORE_SETTINGS = 'appSettings';
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   soundSource: 'piano',
   masterVolume: 0.8,
+  noteDecayMs: 0,
   sustainLatch: false,
   keyWidth: 60,
   visibleKeysCount: 8,

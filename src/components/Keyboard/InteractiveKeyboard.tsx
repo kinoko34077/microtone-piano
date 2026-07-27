@@ -1,21 +1,17 @@
-/**
- * 多段微分音Web鍵盤 - 鍵盤描画・インタラクティブ演奏コンポーネント
- */
-
-import React, { useRef, useState, useCallback } from 'react';
-import { LayoutPreset, TuningPreset, AppSettings, ActiveVoice } from '../../types/keyboard';
-import { encodeAddress } from '../../core/address';
-import { calculateFrequency, getFormattedPitchLabel, resolvePitch } from '../../core/pitch';
-import { globalAudioEngine } from '../../core/audio';
+import React, {useCallback, useRef, useState} from 'react';
+import {LayoutPreset, TuningPreset, AppSettings} from '../../types/keyboard';
+import {encodeAddress} from '../../core/address';
+import {calculateFrequency, getFormattedPitchLabel, resolvePitch} from '../../core/pitch';
+import {globalAudioEngine} from '../../core/audio';
 
 interface InteractiveKeyboardProps {
   layout: LayoutPreset;
   tuning: TuningPreset;
   settings: AppSettings;
-  octaveShift?: number; // 上下2段表示時などのオクターブシフト (0, 1, -1など)
+  octaveShift?: number;
   selectedAddress?: number | null;
   onSelectAddress?: (addr: number) => void;
-  activeVoices: ActiveVoice[];
+  externalPressedAddresses?: Set<number>;
 }
 
 export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
@@ -25,18 +21,16 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   octaveShift = 0,
   selectedAddress,
   onSelectAddress,
-  activeVoices,
+  externalPressedAddresses,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pressedAddresses, setPressedAddresses] = useState<Map<string, { address: number; voiceId: string }>>(
-    new Map<string, { address: number; voiceId: string }>()
+  const [pressedPointers, setPressedPointers] = useState<Map<string, {address: number; voiceId: string}>>(
+    new Map<string, {address: number; voiceId: string}>(),
   );
 
-  // アクティブなVoiceのSetを作成 (描画用)
-  const activeAddressSet = new Set<number>();
-  activeVoices.forEach((v) => activeAddressSet.add(v.address));
+  const heldAddressSet = new Set<number>(externalPressedAddresses ?? []);
+  pressedPointers.forEach(({address}) => heldAddressSet.add(address));
 
-  // 各レーンの有効段数と境界情報を取得 (periodでラップ)
   const getLaneDepths = (x: number, isBlack: boolean) => {
     const period = layout.horizontalCount || 16;
     const laneIdx = (x % period) * 2 + (isBlack ? 1 : 0);
@@ -44,126 +38,89 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     return lane ? lane.activeDepths : 0;
   };
 
-  /**
-   * タッチ/マウスポインタ位置から対象の番地を計算 (hit-test)
-   */
   const getAddressFromCoordinates = useCallback(
     (clientX: number, clientY: number): number | null => {
       if (!containerRef.current) return null;
 
       const rect = containerRef.current.getBoundingClientRect();
       const scrollLeft = containerRef.current.scrollLeft;
-
       const relX = clientX - rect.left + scrollLeft;
       const relY = clientY - rect.top;
       const totalHeight = rect.height;
-
       const keyW = settings.keyWidth;
       const blackH = totalHeight * settings.blackKeyHeightRatio;
-      
       const visibleCols = Math.max(16, Math.ceil(rect.width / keyW) + 1);
 
-      // --- Phase 1: 黒鍵判定 (優先) ---
       if (relY <= blackH) {
         for (let x = 0; x < visibleCols; x++) {
           const activeDepths = getLaneDepths(x, true);
           if (activeDepths === 0 && !settings.showInvalidSections) continue;
 
-          // 黒鍵のX位置: 白鍵x と 白鍵(x+1) の境界線を中心に設置
           const blackW = keyW * settings.blackKeyWidthRatio;
           const center = (x + 1) * keyW;
           const blackLeft = center - blackW / 2;
           const blackRight = center + blackW / 2;
 
           if (relX >= blackLeft && relX <= blackRight) {
-            const topRatio = relY / blackH; // 0.0 (最上部) ~ 1.0 (最下部)
-
-            const depth = calculateDepthFromRatio(
+            return encodeAddress(
               x,
               true,
-              topRatio,
-              activeDepths,
-              layout,
-              settings
+              calculateDepthFromRatio(x, true, relY / blackH, activeDepths, layout, settings),
             );
-            return encodeAddress(x, true, depth);
           }
         }
       }
 
-      // --- Phase 2: 白鍵判定 ---
       const whiteXIndex = Math.floor(relX / keyW);
       if (whiteXIndex >= 0 && whiteXIndex < visibleCols) {
         const activeDepths = getLaneDepths(whiteXIndex, false);
-        const topRatio = relY / totalHeight; // 0.0 (最上部) ~ 1.0 (最下部)
-
-        const depth = calculateDepthFromRatio(
+        return encodeAddress(
           whiteXIndex,
           false,
-          topRatio,
-          activeDepths,
-          layout,
-          settings
+          calculateDepthFromRatio(whiteXIndex, false, relY / totalHeight, activeDepths, layout, settings),
         );
-        return encodeAddress(whiteXIndex, false, depth);
       }
 
       return null;
     },
-    [layout, settings]
+    [layout, settings],
   );
 
-  /**
-   * 音声再生のトリガー
-   */
   const triggerNoteOn = useCallback(
     async (address: number, pointerKey: string, velocity: number = 1.0) => {
       const period = layout.horizontalCount || 16;
       const x = Math.floor(address / 16);
       const isBlack = (address % 16) >= 8;
       const depth = address % 8;
-      
       const baseAddress = encodeAddress(x % period, isBlack, depth);
       const octOffset = Math.floor(x / period);
-      
       const pitchId = layout.mapping[baseAddress];
+
       if (pitchId === undefined || pitchId === -1) {
-        if (onSelectAddress) onSelectAddress(address);
+        onSelectAddress?.(address);
         return;
       }
 
-      const { pitchDef, octaveShift: tuningOctaveShift } = resolvePitch(pitchId, tuning);
+      const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchId, tuning);
       if (!pitchDef) return;
 
       const freq = calculateFrequency(pitchDef, tuning, octaveShift + tuningOctaveShift + octOffset);
+      const voiceId = await globalAudioEngine.noteOn(address, pitchId, freq, velocity, pointerKey);
 
-      const voiceId = await globalAudioEngine.noteOn(
-        address,
-        pitchId,
-        freq,
-        velocity,
-        pointerKey
-      );
-
-      setPressedAddresses((prev) => {
-        const next = new Map<string, { address: number; voiceId: string }>(prev);
-        next.set(pointerKey, { address, voiceId });
+      setPressedPointers((prev) => {
+        const next = new Map(prev);
+        next.set(pointerKey, {address, voiceId});
         return next;
       });
 
-      if (onSelectAddress) {
-        onSelectAddress(address);
-      }
+      onSelectAddress?.(address);
     },
-    [layout, tuning, octaveShift, onSelectAddress]
+    [layout, octaveShift, onSelectAddress, tuning],
   );
 
-  /**
-   * 音声停止のトリガー
-   */
   const triggerNoteOff = useCallback((pointerKey: string) => {
-    setPressedAddresses((prev) => {
-      const next = new Map<string, { address: number; voiceId: string }>(prev);
+    setPressedPointers((prev) => {
+      const next = new Map(prev);
       const item = next.get(pointerKey);
       if (item) {
         globalAudioEngine.noteOff(item.voiceId);
@@ -173,21 +130,21 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     });
   }, []);
 
-  // ポインターイベント (マウス/マルチタッチ/グリッサンド)
   const handlePointerDown = (e: React.PointerEvent) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     const pointerKey = `pointer_${e.pointerId}`;
     const addr = getAddressFromCoordinates(e.clientX, e.clientY);
     if (addr !== null) {
       const pressure = e.pressure && e.pressure > 0 ? e.pressure : 1.0;
-      triggerNoteOn(addr, pointerKey, pressure);
+      void triggerNoteOn(addr, pointerKey, pressure);
     }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!e.buttons && e.pointerType === 'mouse') return;
+
     const pointerKey = `pointer_${e.pointerId}`;
-    const currentItem = pressedAddresses.get(pointerKey);
+    const currentItem = pressedPointers.get(pointerKey);
     const newAddr = getAddressFromCoordinates(e.clientX, e.clientY);
 
     if (newAddr !== null) {
@@ -196,7 +153,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           triggerNoteOff(pointerKey);
         }
         const pressure = e.pressure && e.pressure > 0 ? e.pressure : 1.0;
-        triggerNoteOn(newAddr, pointerKey, pressure);
+        void triggerNoteOn(newAddr, pointerKey, pressure);
       }
     } else if (currentItem) {
       triggerNoteOff(pointerKey);
@@ -204,8 +161,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    const pointerKey = `pointer_${e.pointerId}`;
-    triggerNoteOff(pointerKey);
+    triggerNoteOff(`pointer_${e.pointerId}`);
   };
 
   const [visibleColumns, setVisibleColumns] = useState(16);
@@ -215,19 +171,15 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const width = entry.contentRect.width;
-        // 画面幅を埋めるのに必要な列数を計算 (+1 余裕を持たせる)
-        const cols = Math.max(16, Math.ceil(width / settings.keyWidth) + 1);
-        setVisibleColumns(cols);
+        setVisibleColumns(Math.max(16, Math.ceil(width / settings.keyWidth) + 1));
       }
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, [settings.keyWidth]);
 
-  // 16白鍵の描画 -> 可変白鍵の描画
   const renderWhiteKey = (x: number) => {
     const activeDepths = getLaneDepths(x, false);
-    const totalDepths = 8;
     const period = layout.horizontalCount || 16;
     const octOffset = Math.floor(x / period);
     const baseX = x % period;
@@ -236,31 +188,27 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       <div
         key={`white_${x}`}
         className="relative flex flex-col border-r border-slate-400/80 bg-white select-none h-full shadow-[inset_-1px_0_2px_rgba(0,0,0,0.1)] rounded-b-md"
-        style={{ width: `${settings.keyWidth}px`, flexShrink: 0 }}
+        style={{width: `${settings.keyWidth}px`, flexShrink: 0}}
       >
-        {/* 奥 (depth=7) から 手前 (depth=0) へ上から順に配置 */}
-        {Array.from({ length: totalDepths }, (_, idx) => {
-          const depth = 7 - idx; // 上が奥(7), 下が手前(0)
+        {Array.from({length: 8}, (_, idx) => {
+          const depth = 7 - idx;
           const isInvalid = depth >= activeDepths;
           const address = encodeAddress(x, false, depth);
           const baseAddress = encodeAddress(baseX, false, depth);
-          
           const pitchId = layout.mapping[baseAddress];
-          const isPressed = activeAddressSet.has(address);
+          const isPressed = heldAddressSet.has(address);
           const isSelected = selectedAddress === address;
 
           if (isInvalid && !settings.showInvalidSections) {
-            return null; // 無効区間表示オフなら、モードに関わらず非表示（詰める）
+            return null;
           }
 
-          const { pitchDef, octaveShift: tuningOctaveShift } = resolvePitch(pitchId, tuning);
+          const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchId, tuning);
           const totalOctaveShift = octaveShift + tuningOctaveShift + octOffset;
-
           const formattedLabel = pitchDef
             ? getFormattedPitchLabel(pitchDef, tuning, settings.pitchLabelMode, totalOctaveShift)
             : '';
 
-          // オクターブに応じたバッジの背景カラー (画像のようなポップなバッジ)
           const stepVal = pitchDef?.step ?? 0;
           const edoVal = pitchDef?.edo ?? 12;
           const octVal = Math.floor((stepVal + totalOctaveShift * edoVal) / edoVal) + 4;
@@ -268,10 +216,10 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             octVal <= 3
               ? 'bg-amber-300 text-amber-950 border-amber-400'
               : octVal === 4
-              ? 'bg-emerald-300 text-emerald-950 border-emerald-400'
-              : octVal === 5
-              ? 'bg-sky-300 text-sky-950 border-sky-400'
-              : 'bg-indigo-300 text-indigo-950 border-indigo-400';
+                ? 'bg-emerald-300 text-emerald-950 border-emerald-400'
+                : octVal === 5
+                  ? 'bg-sky-300 text-sky-950 border-sky-400'
+                  : 'bg-indigo-300 text-indigo-950 border-indigo-400';
 
           return (
             <div
@@ -280,10 +228,10 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
                 isPressed
                   ? 'bg-gradient-to-b from-amber-300 to-amber-400 text-amber-950 font-bold shadow-inner'
                   : isSelected
-                  ? 'bg-sky-100 border-sky-400 text-sky-900 font-medium'
-                  : isInvalid
-                  ? 'bg-slate-200/80 text-slate-400 border-slate-300'
-                  : 'hover:bg-slate-100 text-slate-800'
+                    ? 'bg-sky-100 border-sky-400 text-sky-900 font-medium'
+                    : isInvalid
+                      ? 'bg-slate-200/80 text-slate-400 border-slate-300'
+                      : 'hover:bg-slate-100 text-slate-800'
               }`}
             >
               <div className="flex justify-between items-center text-[8px] font-mono opacity-50">
@@ -293,7 +241,6 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
                 )}
               </div>
 
-              {/* 鍵盤裾の音名ラベルバッジ (添付画像のような直感的デザイン) */}
               <div className="flex justify-center items-end mb-1">
                 {formattedLabel && (
                   <span
@@ -310,16 +257,14 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     );
   };
 
-  // 黒鍵の描画 (重ね表示)
-  const renderBlackKeys = () => {
-    return Array.from({ length: visibleColumns }, (_, x) => {
+  const renderBlackKeys = () =>
+    Array.from({length: visibleColumns}, (_, x) => {
       const activeDepths = getLaneDepths(x, true);
       if (activeDepths === 0 && !settings.showInvalidSections) return null;
 
       const period = layout.horizontalCount || 16;
       const octOffset = Math.floor(x / period);
       const baseX = x % period;
-
       const blackWidth = settings.keyWidth * settings.blackKeyWidthRatio;
       const center = (x + 1) * settings.keyWidth;
       const blackLeft = center - blackWidth / 2;
@@ -334,23 +279,21 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             height: `${settings.blackKeyHeightRatio * 100}%`,
           }}
         >
-          {Array.from({ length: 8 }, (_, idx) => {
-            const depth = 7 - idx; // 奥(7) -> 手前(0)
+          {Array.from({length: 8}, (_, idx) => {
+            const depth = 7 - idx;
             const isInvalid = depth >= activeDepths;
             const address = encodeAddress(x, true, depth);
             const baseAddress = encodeAddress(baseX, true, depth);
-            
             const pitchId = layout.mapping[baseAddress];
-            const isPressed = activeAddressSet.has(address);
+            const isPressed = heldAddressSet.has(address);
             const isSelected = selectedAddress === address;
 
             if (isInvalid && !settings.showInvalidSections) {
-              return null; // 無効区間表示オフなら、モードに関わらず非表示（詰める）
+              return null;
             }
 
-            const { pitchDef, octaveShift: tuningOctaveShift } = resolvePitch(pitchId, tuning);
+            const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchId, tuning);
             const totalOctaveShift = octaveShift + tuningOctaveShift + octOffset;
-
             const formattedLabel = pitchDef
               ? getFormattedPitchLabel(pitchDef, tuning, settings.pitchLabelMode, totalOctaveShift)
               : '';
@@ -362,10 +305,10 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
                   isPressed
                     ? 'bg-amber-400 text-amber-950 font-bold shadow-inner border-amber-500'
                     : isSelected
-                    ? 'bg-sky-500 text-white font-medium border-sky-400'
-                    : isInvalid
-                    ? 'bg-slate-900/60 text-slate-700 border-slate-800'
-                    : 'bg-slate-900 hover:bg-slate-800 text-slate-200'
+                      ? 'bg-sky-500 text-white font-medium border-sky-400'
+                      : isInvalid
+                        ? 'bg-slate-900/60 text-slate-700 border-slate-800'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-200'
                 }`}
               >
                 <div className="flex justify-between items-center text-[7px] font-mono opacity-40">
@@ -375,7 +318,6 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
                   )}
                 </div>
 
-                {/* 黒鍵音名表示 */}
                 <div className="flex justify-center items-end mb-0.5">
                   {formattedLabel && (
                     <span className="px-1 py-0.2 rounded text-[9px] font-extrabold bg-slate-800 text-amber-300 border border-slate-700 font-sans">
@@ -389,11 +331,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         </div>
       );
     });
-  };
 
   return (
     <div className="w-full flex flex-col h-full bg-[#0d1117] overflow-hidden">
-      {/* スクロール鍵盤エリア */}
       <div
         ref={containerRef}
         className="relative flex-1 flex overflow-x-hidden overflow-y-hidden touch-none select-none p-0 cursor-pointer"
@@ -403,10 +343,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         onPointerCancel={handlePointerUp}
       >
         <div className="relative flex h-full w-full">
-          {/* 白鍵群 */}
-          {Array.from({ length: visibleColumns }, (_, x) => renderWhiteKey(x))}
-
-          {/* 黒鍵群 (重ね) */}
+          {Array.from({length: visibleColumns}, (_, x) => renderWhiteKey(x))}
           {renderBlackKeys()}
         </div>
       </div>
@@ -414,29 +351,23 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   );
 };
 
-// 上からの位置比率 (0.0~1.0) から奥行 depth (0~7) を算出するヘルパー
 function calculateDepthFromRatio(
   x: number,
   isBlack: boolean,
-  topRatio: number, // 0.0 (最上部/画面奥 depth 7 または activeDepths-1) ~ 1.0 (最下部/画面手前 depth 0)
+  topRatio: number,
   activeDepths: number,
   layout: LayoutPreset,
-  settings: AppSettings
+  settings: AppSettings,
 ): number {
   if (activeDepths <= 0) return 0;
 
   const clampedTopRatio = Math.max(0, Math.min(0.9999, topRatio));
 
-  // 1. 無効区画を表示する場合 (8段全体が画面に均等描画されている)
   if (settings.showInvalidSections) {
     const idxFromTop = Math.floor(clampedTopRatio * 8);
-    const depth = 7 - idxFromTop;
-    return Math.max(0, Math.min(7, depth));
+    return Math.max(0, Math.min(7, 7 - idxFromTop));
   }
 
-  // 2. 無効区画を非表示の場合 (画面には activeDepths 個のブロックが均等配置されている)
-  // 無効段配置モードに関わらず、表示されている段のみでタッチ判定を行う
   const idxFromTop = Math.floor(clampedTopRatio * activeDepths);
-  const depth = (activeDepths - 1) - idxFromTop;
-  return Math.max(0, Math.min(activeDepths - 1, depth));
+  return Math.max(0, Math.min(activeDepths - 1, activeDepths - 1 - idxFromTop));
 }

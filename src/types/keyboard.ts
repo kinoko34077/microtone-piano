@@ -81,6 +81,7 @@ export type PitchLabelMode = 'note' | 'doremi' | 'step' | 'freq' | 'none';
 export interface AppSettings {
   soundSource: 'piano' | 'sawtooth' | 'square';
   masterVolume: number; // 0.0 ~ 1.0
+  noteDecayMs?: number;
   sustainLatch: boolean;
   sustainMomentary?: boolean;
   keyWidth: number; // 鍵盤1横位置あたりのピクセル幅 (例: 60px)
