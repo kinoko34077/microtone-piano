@@ -1,20 +1,31 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Multi-stage Microtonal Web Keyboard
 
-# Run and deploy your AI Studio app
+This repository contains a Vite + React web app for a microtonal keyboard UI.
 
-This contains everything you need to run your app locally.
+## Local development
 
-View your app in AI Studio: https://ai.studio/apps/aa650d1d-648d-4cc3-9d2a-cbfc2c33750f
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+Prerequisite: Node.js 20 or later.
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Start the dev server:
    `npm run dev`
+3. Create a production build:
+   `npm run build`
+
+## GitHub Pages deployment
+
+The app is configured with a relative Vite `base` path, so it can be hosted from a GitHub Pages project URL such as `https://<account>.github.io/<repo>/` without hardcoding the repository name.
+
+### One-time GitHub setup
+
+1. Push this repository to GitHub.
+2. In the repository settings, open `Pages`.
+3. Set `Source` to `GitHub Actions`.
+
+### Deploy flow
+
+- The workflow at `.github/workflows/deploy-pages.yml` runs on every push to `main`.
+- It installs dependencies, builds the app, uploads `dist`, and deploys it to GitHub Pages.
+
+If you use a branch other than `main`, update the workflow trigger accordingly.
