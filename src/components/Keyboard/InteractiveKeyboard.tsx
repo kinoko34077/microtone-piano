@@ -120,7 +120,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
   const triggerNoteOff = useCallback((pointerKey: string) => {
     setPressedPointers((prev) => {
-      const next = new Map(prev);
+      const next = new Map<string, {address: number; voiceId: string}>(prev);
       const item = next.get(pointerKey);
       if (item) {
         globalAudioEngine.noteOff(item.voiceId);

@@ -1,7 +1,7 @@
 {
-  "name": "Multi-stage Microtonal Web Keyboard",
-  "short_name": "Microtone Keys",
-  "description": "A browser-based microtonal keyboard with editable layouts and tunings.",
+  "name": "多段微分音Web鍵盤",
+  "short_name": "微分音鍵盤",
+  "description": "配置と音律を編集できるブラウザベースの微分音鍵盤です。",
   "lang": "ja",
   "id": "./",
   "start_url": "./",

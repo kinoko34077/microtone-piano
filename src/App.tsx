@@ -77,7 +77,7 @@ export default function App() {
     const dup: LayoutPreset = {
       ...currentLayout,
       id: `layout_custom_${Date.now()}`,
-      name: `${currentLayout.name} (copy)`,
+      name: `${currentLayout.name}（複製）`,
       isStandard: false,
     };
     setAllLayouts((prev) => [...prev, dup]);
@@ -97,7 +97,7 @@ export default function App() {
     const dup: TuningPreset = {
       ...currentTuning,
       id: `tuning_custom_${Date.now()}`,
-      name: `${currentTuning.name} (copy)`,
+      name: `${currentTuning.name}（複製）`,
       isStandard: false,
     };
     setAllTunings((prev) => [...prev, dup]);
@@ -134,7 +134,7 @@ export default function App() {
       const dup: LayoutPreset = storageService.deepClone({
         ...newLayout,
         id: `layout_custom_${Date.now()}`,
-        name: `${newLayout.name} (custom)`,
+        name: `${newLayout.name}（カスタム）`,
         isStandard: false,
       });
       setAllLayouts((prev) => [...prev, dup]);
@@ -153,7 +153,7 @@ export default function App() {
       const dup: TuningPreset = storageService.deepClone({
         ...newTuning,
         id: `tuning_custom_${Date.now()}`,
-        name: `${newTuning.name} (custom)`,
+        name: `${newTuning.name}（カスタム）`,
         isStandard: false,
       });
       setAllTunings((prev) => [...prev, dup]);
@@ -277,7 +277,7 @@ export default function App() {
             ? 'border-amber-400 bg-amber-400/95 text-slate-950'
             : 'border-[#30363d] bg-[#161b22]/90 text-slate-300 hover:bg-[#21262d]'
         }`}
-        title="Sustain latch"
+        title="サステイン固定"
       >
         Sus
       </button>
@@ -285,7 +285,7 @@ export default function App() {
       <button
         onClick={() => setIsSidebarOpen(true)}
         className="app-menu-button fixed z-30 p-2.5 bg-[#161b22]/90 hover:bg-[#21262d] rounded-lg border border-[#30363d] text-slate-200 shadow-2xl transition-all backdrop-blur-sm"
-        title="Open settings"
+        title="設定を開く"
       >
         <Menu size={20} />
       </button>
@@ -316,7 +316,7 @@ export default function App() {
             {settings.showTwoRows && (
               <div className="flex-1 flex flex-col min-h-0 border-b border-[#30363d]">
                 <OctaveBar
-                  label="Upper"
+                  label="上段"
                   octaveOffset={settings.upperOctaveOffset ?? 1}
                   onChangeOctaveOffset={(off) => handleUpdateSettings({...settings, upperOctaveOffset: off})}
                   keyWidth={settings.keyWidth}
@@ -338,7 +338,7 @@ export default function App() {
 
             <div className="flex-1 flex flex-col min-h-0">
               <OctaveBar
-                label={settings.showTwoRows ? 'Lower' : undefined}
+                label={settings.showTwoRows ? '下段' : undefined}
                 octaveOffset={settings.lowerOctaveOffset ?? 0}
                 onChangeOctaveOffset={(off) => handleUpdateSettings({...settings, lowerOctaveOffset: off})}
                 keyWidth={settings.keyWidth}
