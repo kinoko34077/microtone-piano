@@ -1,10 +1,6 @@
-import React, {useCallback, useEffect, useState} from 'react';
-import {
-  LayoutPreset,
-  TuningPreset,
-  AppSettings,
-  OutOfRangeNotice,
-} from './types/keyboard';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import {Menu} from 'lucide-react';
+import {LayoutPreset, TuningPreset, AppSettings, OutOfRangeNotice} from './types/keyboard';
 import {
   ALL_STANDARD_LAYOUTS,
   ALL_STANDARD_TUNINGS,
@@ -19,13 +15,25 @@ import {Sidebar} from './components/Sidebar';
 import {InteractiveKeyboard} from './components/Keyboard/InteractiveKeyboard';
 import {OctaveBar} from './components/Keyboard/OctaveBar';
 import {PresetEditor} from './components/Editor/PresetEditor';
-import {NoticeToast} from './components/NoticeToast';
-import {Menu} from 'lucide-react';
 
 type PressedPcKey = {
   voiceId: string;
   address: number;
 };
+
+const MAX_OCTAVE_OFFSET = 5;
+
+function clampOctaveOffset(value: number): number {
+  return Math.min(MAX_OCTAVE_OFFSET, value);
+}
+
+function normalizeSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    upperOctaveOffset: clampOctaveOffset(settings.upperOctaveOffset ?? DEFAULT_APP_SETTINGS.upperOctaveOffset),
+    lowerOctaveOffset: clampOctaveOffset(settings.lowerOctaveOffset ?? DEFAULT_APP_SETTINGS.lowerOctaveOffset),
+  };
+}
 
 export default function App() {
   const [allLayouts, setAllLayouts] = useState<LayoutPreset[]>(ALL_STANDARD_LAYOUTS);
@@ -43,7 +51,7 @@ export default function App() {
     const initData = async () => {
       const layouts = await storageService.getAllLayoutPresets();
       const tunings = await storageService.getAllTuningPresets();
-      const loadedSettings = await storageService.getSettings();
+      const loadedSettings = normalizeSettings(await storageService.getSettings());
 
       setAllLayouts(layouts);
       setAllTunings(tunings);
@@ -53,25 +61,33 @@ export default function App() {
       globalAudioEngine.setMasterVolume(loadedSettings.masterVolume);
       globalAudioEngine.setNoteDecayMs(loadedSettings.noteDecayMs ?? 0);
       globalAudioEngine.setSustain(loadedSettings.sustainLatch);
+
+      if (
+        loadedSettings.upperOctaveOffset !== (await storageService.getSettings()).upperOctaveOffset ||
+        loadedSettings.lowerOctaveOffset !== (await storageService.getSettings()).lowerOctaveOffset
+      ) {
+        void storageService.saveSettings(loadedSettings);
+      }
     };
 
     void initData();
 
     globalAudioEngine.setOutOfRangeNoticeCallback((notice) => {
-      setNotices((prev) => [...prev.slice(-4), notice]);
+      setNotices((prev) => [...prev.slice(-7), notice]);
     });
   }, []);
 
-  const handleUpdateSettings = (newSettings: AppSettings) => {
-    setSettings(newSettings);
-    void storageService.saveSettings(newSettings);
-  };
+  const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
+    const normalized = normalizeSettings(newSettings);
+    setSettings(normalized);
+    void storageService.saveSettings(normalized);
+  }, []);
 
   const handleToggleSustainLatch = useCallback(() => {
     const next = !settings.sustainLatch;
     handleUpdateSettings({...settings, sustainLatch: next});
     globalAudioEngine.setSustainLatch(next);
-  }, [settings]);
+  }, [handleUpdateSettings, settings]);
 
   const handleDuplicateLayout = useCallback(() => {
     const dup: LayoutPreset = {
@@ -113,21 +129,21 @@ export default function App() {
     void storageService.saveTuningPreset(currentTuning);
   }, [currentTuning, handleDuplicateTuning]);
 
-  const handleSelectLayout = (layout: LayoutPreset) => {
+  const handleSelectLayout = useCallback((layout: LayoutPreset) => {
     globalAudioEngine.allNotesOff();
     setCurrentLayout(layout);
     if (layout.defaultTuningId) {
-      const matched = allTunings.find((t) => t.id === layout.defaultTuningId);
+      const matched = allTunings.find((tuning) => tuning.id === layout.defaultTuningId);
       if (matched) {
         setCurrentTuning(matched);
       }
     }
-  };
+  }, [allTunings]);
 
-  const handleSelectTuning = (tuning: TuningPreset) => {
+  const handleSelectTuning = useCallback((tuning: TuningPreset) => {
     globalAudioEngine.allNotesOff();
     setCurrentTuning(tuning);
-  };
+  }, []);
 
   const handleUpdateLayout = useCallback((newLayout: LayoutPreset) => {
     if (newLayout.isStandard) {
@@ -183,24 +199,24 @@ export default function App() {
       });
     };
 
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      if (e.repeat || isEditableTarget(e.target)) {
+    const handleKeyDown = async (event: KeyboardEvent) => {
+      if (event.repeat || isEditableTarget(event.target)) {
         return;
       }
 
-      if (e.code === 'Space') {
-        e.preventDefault();
+      if (event.code === 'Space') {
+        event.preventDefault();
         globalAudioEngine.setSustainMomentary(true);
         return;
       }
 
-      const addr = keyToAddress(e.key, settings.pcDepthOffset);
-      if (addr === null) {
+      const address = keyToAddress(event.key, settings.pcDepthOffset);
+      if (address === null || pcPressedMap.has(event.key)) {
         return;
       }
 
-      e.preventDefault();
-      const pitchId = currentLayout.mapping[addr];
+      event.preventDefault();
+      const pitchId = currentLayout.mapping[address];
       if (pitchId === undefined || pitchId === -1) {
         return;
       }
@@ -210,24 +226,24 @@ export default function App() {
         return;
       }
 
-      const freq = calculateFrequency(pitchDef, currentTuning, octaveShift);
-      const voiceId = await globalAudioEngine.noteOn(addr, pitchId, freq, 1.0, `pc_${e.key}`);
-      setPcPressedMap((prev) => new Map(prev).set(e.key, {voiceId, address: addr}));
-      setSelectedAddress(addr);
+      const frequency = calculateFrequency(pitchDef, currentTuning, octaveShift);
+      const voiceId = await globalAudioEngine.noteOn(address, pitchId, frequency, 1.0, `pc_${event.key}`);
+      setPcPressedMap((prev) => new Map(prev).set(event.key, {voiceId, address}));
+      setSelectedAddress(address);
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) {
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target)) {
         return;
       }
 
-      if (e.code === 'Space') {
-        e.preventDefault();
+      if (event.code === 'Space') {
+        event.preventDefault();
         globalAudioEngine.setSustainMomentary(false);
         return;
       }
 
-      const pressed = pcPressedMap.get(e.key);
+      const pressed = pcPressedMap.get(event.key);
       if (!pressed) {
         return;
       }
@@ -235,7 +251,7 @@ export default function App() {
       globalAudioEngine.noteOff(pressed.voiceId);
       setPcPressedMap((prev) => {
         const next = new Map(prev);
-        next.delete(e.key);
+        next.delete(event.key);
         return next;
       });
     };
@@ -261,12 +277,13 @@ export default function App() {
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [settings, currentLayout, currentTuning, pcPressedMap]);
+  }, [currentLayout, currentTuning, pcPressedMap, settings.pcDepthOffset]);
 
-  const pressedAddressSet = new Set<number>();
-  pcPressedMap.forEach(({address}) => {
-    pressedAddressSet.add(address);
-  });
+  const pressedAddressSet = useMemo(() => {
+    const next = new Set<number>();
+    pcPressedMap.forEach(({address}) => next.add(address));
+    return next;
+  }, [pcPressedMap]);
 
   return (
     <div className="app-shell relative flex flex-col overflow-hidden bg-[#0d1117] text-slate-100 font-sans">
@@ -284,7 +301,7 @@ export default function App() {
 
       <button
         onClick={() => setIsSidebarOpen(true)}
-        className="app-menu-button fixed z-30 p-2.5 bg-[#161b22]/90 hover:bg-[#21262d] rounded-lg border border-[#30363d] text-slate-200 shadow-2xl transition-all backdrop-blur-sm"
+        className="app-menu-button fixed z-30 rounded-lg border border-[#30363d] bg-[#161b22]/90 p-2.5 text-slate-200 shadow-2xl transition-all backdrop-blur-sm hover:bg-[#21262d]"
         title="設定を開く"
       >
         <Menu size={20} />
@@ -308,21 +325,23 @@ export default function App() {
         onUpdateLayout={handleUpdateLayout}
         activeMode={activeMode}
         onChangeMode={setActiveMode}
+        notices={notices}
+        onDismissNotice={(id) => setNotices((prev) => prev.filter((notice) => notice.id !== id))}
       />
 
-      <main className={`flex-1 flex flex-col h-full w-full ${activeMode === 'keyboard' ? 'overflow-hidden' : 'p-3 overflow-y-auto'}`}>
+      <main className={`flex h-full w-full flex-1 flex-col ${activeMode === 'keyboard' ? 'overflow-hidden' : 'overflow-y-auto p-3'}`}>
         {activeMode === 'keyboard' && (
-          <div className="flex flex-col h-full w-full">
+          <div className="flex h-full w-full flex-col">
             {settings.showTwoRows && (
-              <div className="flex-1 flex flex-col min-h-0 border-b border-[#30363d]">
+              <div className="flex min-h-0 flex-1 flex-col border-b border-[#30363d]">
                 <OctaveBar
                   label="上段"
                   octaveOffset={settings.upperOctaveOffset ?? 1}
-                  onChangeOctaveOffset={(off) => handleUpdateSettings({...settings, upperOctaveOffset: off})}
+                  onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, upperOctaveOffset: offset})}
                   keyWidth={settings.keyWidth}
-                  onChangeKeyWidth={(w) => handleUpdateSettings({...settings, keyWidth: w})}
+                  onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width})}
                 />
-                <div className="flex-1 relative min-h-0">
+                <div className="relative min-h-0 flex-1">
                   <InteractiveKeyboard
                     layout={currentLayout}
                     tuning={currentTuning}
@@ -336,15 +355,15 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex-1 flex flex-col min-h-0">
+            <div className="flex min-h-0 flex-1 flex-col">
               <OctaveBar
                 label={settings.showTwoRows ? '下段' : undefined}
                 octaveOffset={settings.lowerOctaveOffset ?? 0}
-                onChangeOctaveOffset={(off) => handleUpdateSettings({...settings, lowerOctaveOffset: off})}
+                onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, lowerOctaveOffset: offset})}
                 keyWidth={settings.keyWidth}
-                onChangeKeyWidth={(w) => handleUpdateSettings({...settings, keyWidth: w})}
+                onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width})}
               />
-              <div className="flex-1 relative min-h-0">
+              <div className="relative min-h-0 flex-1">
                 <InteractiveKeyboard
                   layout={currentLayout}
                   tuning={currentTuning}
@@ -372,11 +391,6 @@ export default function App() {
           />
         )}
       </main>
-
-      <NoticeToast
-        notices={notices}
-        onDismiss={(id) => setNotices((prev) => prev.filter((notice) => notice.id !== id))}
-      />
     </div>
   );
 }

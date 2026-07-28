@@ -16,6 +16,7 @@ interface VoiceNode {
   isReleased: boolean;
   startTime: number;
   decayTimeoutId?: number;
+  naturalEndTimeoutId?: number;
 }
 
 export class AudioEngine {
@@ -128,7 +129,7 @@ export class AudioEngine {
     voiceGain.gain.linearRampToValueAtTime(velocityGain, now + attackTime);
     voiceGain.connect(this.masterGain!);
 
-    const {oscillators, sourceNodes} = await this.createSourcesForVoice(ctx, frequency, voiceGain, now);
+    const {oscillators, sourceNodes, naturalDurationMs} = await this.createSourcesForVoice(ctx, frequency, voiceGain, now);
 
     const voiceNode: VoiceNode = {
       voiceId,
@@ -152,6 +153,15 @@ export class AudioEngine {
         }
         this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
       }, Math.ceil(attackTime * 1000 + this.noteDecayMs + 50));
+    }
+
+    if (naturalDurationMs !== undefined) {
+      voiceNode.naturalEndTimeoutId = window.setTimeout(() => {
+        if (!this.activeVoices.has(voiceId) || !this.ctx) {
+          return;
+        }
+        this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
+      }, naturalDurationMs);
     }
 
     this.activeVoices.set(voiceId, voiceNode);
@@ -271,7 +281,7 @@ export class AudioEngine {
     frequency: number,
     gainNode: GainNode,
     now: number
-  ): Promise<Pick<VoiceNode, 'oscillators' | 'sourceNodes'>> {
+  ): Promise<Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}> {
     if (this.soundSource === 'piano') {
       return this.createPianoSources(ctx, frequency, gainNode, now);
     }
@@ -293,20 +303,22 @@ export class AudioEngine {
     frequency: number,
     gainNode: GainNode,
     now: number
-  ): Promise<Pick<VoiceNode, 'oscillators' | 'sourceNodes'>> {
+  ): Promise<Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}> {
     const sample = findNearestPianoSample(frequency);
     if (sample) {
       try {
         const buffer = await this.loadPianoSampleBuffer(sample);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.playbackRate.setValueAtTime(frequency / sample.baseFrequency, now);
+        const playbackRate = frequency / sample.baseFrequency;
+        source.playbackRate.setValueAtTime(playbackRate, now);
         source.connect(gainNode);
         source.start(now);
 
         return {
           oscillators: [],
           sourceNodes: [source],
+          naturalDurationMs: Math.ceil((buffer.duration / Math.max(playbackRate, 0.001)) * 1000 + 50),
         };
       } catch {
         // Fallback to synthetic voice below.
@@ -370,6 +382,11 @@ export class AudioEngine {
     if (voice.decayTimeoutId !== undefined) {
       window.clearTimeout(voice.decayTimeoutId);
       voice.decayTimeoutId = undefined;
+    }
+
+    if (voice.naturalEndTimeoutId !== undefined) {
+      window.clearTimeout(voice.naturalEndTimeoutId);
+      voice.naturalEndTimeoutId = undefined;
     }
 
     const gain = voice.gainNode;

@@ -1,6 +1,6 @@
 import React, {useRef} from 'react';
-import {LayoutPreset, TuningPreset, AppSettings} from '../types/keyboard';
-import {Download, Upload, Copy, Save, VolumeX, Keyboard, Edit3, X} from 'lucide-react';
+import {AlertTriangle, Copy, Download, Edit3, Keyboard, Save, Upload, VolumeX, X} from 'lucide-react';
+import {LayoutPreset, TuningPreset, AppSettings, OutOfRangeNotice} from '../types/keyboard';
 import {storageService} from '../core/storage';
 import {globalAudioEngine} from '../core/audio';
 
@@ -22,6 +22,8 @@ interface SidebarProps {
   onUpdateLayout: (newLayout: LayoutPreset) => void;
   activeMode: 'keyboard' | 'editor';
   onChangeMode: (mode: 'keyboard' | 'editor') => void;
+  notices: OutOfRangeNotice[];
+  onDismissNotice: (id: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -42,11 +44,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onUpdateLayout,
   activeMode,
   onChangeMode,
+  notices,
+  onDismissNotice,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const noteDecayMs = settings.noteDecayMs ?? 0;
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return null;
+  }
 
   const handleExportJsonPackage = () => {
     const pkg = {
@@ -70,9 +76,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     storageService.exportAsBinaryPackage(pkg, `microtonal_${currentLayout.name}_${currentTuning.name}.bin`);
   };
 
-  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
 
     try {
       const data = (await storageService.importFromFile(file)) as any;
@@ -88,8 +96,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       } else {
         alert('未対応のファイル形式です。');
       }
-    } catch (err: any) {
-      alert(`読み込みエラー: ${err.message}`);
+    } catch (error: any) {
+      alert(`読み込みエラー: ${error.message}`);
     }
 
     if (fileInputRef.current) {
@@ -99,64 +107,95 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-40" onClick={onClose} />
-      <div className="fixed top-0 right-0 h-full w-[320px] bg-[#0d1117] border-l border-[#30363d] shadow-2xl z-50 flex flex-col overflow-y-auto overflow-x-hidden text-slate-200">
-        <div className="sticky top-0 bg-[#0d1117] border-b border-[#30363d] p-3 flex justify-between items-center z-10">
+      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-50 flex h-full w-[320px] flex-col overflow-x-hidden overflow-y-auto border-l border-[#30363d] bg-[#0d1117] text-slate-200 shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#30363d] bg-[#0d1117] p-3">
           <div className="flex flex-col">
-            <h2 className="font-bold text-sky-400 flex items-center gap-2">
+            <h2 className="flex items-center gap-2 font-bold text-sky-400">
               <span>多段微分音Web鍵盤</span>
-              <span className="text-[10px] px-1.5 py-0.5 bg-sky-950 text-sky-300 border border-sky-800 rounded">v1.2</span>
+              <span className="rounded border border-sky-800 bg-sky-950 px-1.5 py-0.5 text-[10px] text-sky-300">v1.2</span>
             </h2>
             <p className="text-[10px] text-slate-400">微分音鍵盤の設定</p>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-[#21262d] rounded-md transition-colors text-slate-300">
+          <button onClick={onClose} className="rounded-md p-1 text-slate-300 transition-colors hover:bg-[#21262d]">
             <X size={20} />
           </button>
         </div>
 
-        <div className="p-4 flex flex-col gap-6">
-          <div className="flex bg-[#010409] p-1 rounded-lg border border-[#30363d]">
+        <div className="flex flex-col gap-6 p-4">
+          {notices.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-xl border border-amber-700/70 bg-amber-950/40 p-3">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                <AlertTriangle className="h-4 w-4" />
+                音域外の通知
+              </div>
+              {notices.map((notice) => (
+                <div key={notice.id} className="rounded-lg border border-amber-800/70 bg-[#161b22] p-2 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-amber-200">{notice.frequency.toFixed(1)} Hz</div>
+                      <div className="mt-1 break-words text-[11px] leading-tight text-amber-300/90">{notice.message}</div>
+                    </div>
+                    <button
+                      onClick={() => onDismissNotice(notice.id)}
+                      className="shrink-0 rounded p-1 text-amber-400 hover:bg-amber-900/40 hover:text-amber-100"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex rounded-lg border border-[#30363d] bg-[#010409] p-1">
             <button
               onClick={() => {
                 onChangeMode('keyboard');
                 onClose();
               }}
-              className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-md text-xs font-bold ${activeMode === 'keyboard' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-[#161b22]'}`}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-md py-2 text-xs font-bold ${
+                activeMode === 'keyboard' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-[#161b22]'
+              }`}
             >
-              <Keyboard size={16} /> 鍵盤
+              <Keyboard size={16} />
+              鍵盤
             </button>
             <button
               onClick={() => {
                 onChangeMode('editor');
                 onClose();
               }}
-              className={`flex-1 flex items-center justify-center gap-1 py-2 rounded-md text-xs font-bold ${activeMode === 'editor' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-[#161b22]'}`}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-md py-2 text-xs font-bold ${
+                activeMode === 'editor' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-[#161b22]'
+              }`}
             >
-              <Edit3 size={16} /> 編集
+              <Edit3 size={16} />
+              編集
             </button>
           </div>
 
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-bold text-slate-400 tracking-wider border-b border-[#30363d] pb-1">音声</h3>
+            <h3 className="border-b border-[#30363d] pb-1 text-xs font-bold tracking-wider text-slate-400">音声</h3>
 
             <button
               onClick={() => globalAudioEngine.allNotesOff()}
-              className="px-3 py-2 bg-rose-900/50 hover:bg-rose-900 text-rose-300 rounded-lg flex items-center justify-center gap-2"
+              className="flex items-center justify-center gap-2 rounded-lg bg-rose-900/50 px-3 py-2 text-rose-300 hover:bg-rose-900"
               title="全音停止"
             >
               <VolumeX size={18} />
               <span className="text-xs font-bold">全音停止</span>
             </button>
 
-            <label className="text-xs font-bold text-slate-200 mt-2">音源</label>
+            <label className="mt-2 text-xs font-bold text-slate-200">音源</label>
             <select
               value={settings.soundSource}
-              onChange={(e) => {
-                const src = e.target.value as AppSettings['soundSource'];
-                onUpdateSettings({...settings, soundSource: src});
-                globalAudioEngine.setSoundSource(src);
+              onChange={(event) => {
+                const source = event.target.value as AppSettings['soundSource'];
+                onUpdateSettings({...settings, soundSource: source});
+                globalAudioEngine.setSoundSource(source);
               }}
-              className="px-3 py-2 bg-[#161b22] border border-[#30363d] focus:border-sky-500 rounded outline-none"
+              className="rounded border border-[#30363d] bg-[#161b22] px-3 py-2 outline-none focus:border-sky-500"
             >
               <option value="piano">ピアノ</option>
               <option value="sawtooth">ノコギリ波</option>
@@ -174,8 +213,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 max="5000"
                 step="50"
                 value={noteDecayMs}
-                onChange={(e) => {
-                  const next = Number(e.target.value);
+                onChange={(event) => {
+                  const next = Number(event.target.value);
                   onUpdateSettings({...settings, noteDecayMs: next});
                   globalAudioEngine.setNoteDecayMs(next);
                 }}
@@ -189,18 +228,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-bold text-slate-400 tracking-wider border-b border-[#30363d] pb-1">プリセット</h3>
+            <h3 className="border-b border-[#30363d] pb-1 text-xs font-bold tracking-wider text-slate-400">プリセット</h3>
 
             <div className="flex flex-col gap-1">
               <label className="text-[10px] font-bold text-slate-400">配置</label>
               <div className="flex gap-1">
                 <select
                   value={currentLayout.id}
-                  onChange={(e) => {
-                    const sel = allLayouts.find((layout) => layout.id === e.target.value);
-                    if (sel) onSelectLayout(sel);
+                  onChange={(event) => {
+                    const selected = allLayouts.find((layout) => layout.id === event.target.value);
+                    if (selected) {
+                      onSelectLayout(selected);
+                    }
                   }}
-                  className="flex-1 bg-[#161b22] text-xs px-2 py-1.5 rounded border border-[#30363d] outline-none focus:border-sky-500"
+                  className="flex-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-xs outline-none focus:border-sky-500"
                 >
                   {allLayouts.map((layout) => (
                     <option key={layout.id} value={layout.id}>
@@ -208,27 +249,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </option>
                   ))}
                 </select>
-                <button onClick={onDuplicateLayout} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded">
+                <button onClick={onDuplicateLayout} className="rounded bg-[#21262d] p-1.5 hover:bg-[#30363d]">
                   <Copy size={14} />
                 </button>
                 {!currentLayout.isStandard && (
-                  <button onClick={onSaveLayout} className="p-1.5 bg-sky-600 hover:bg-sky-500 rounded">
+                  <button onClick={onSaveLayout} className="rounded bg-sky-600 p-1.5 hover:bg-sky-500">
                     <Save size={14} />
                   </button>
                 )}
               </div>
             </div>
 
-            <div className="flex flex-col gap-1 mt-1">
+            <div className="mt-1 flex flex-col gap-1">
               <label className="text-[10px] font-bold text-slate-400">音律</label>
               <div className="flex gap-1">
                 <select
                   value={currentTuning.id}
-                  onChange={(e) => {
-                    const sel = allTunings.find((tuning) => tuning.id === e.target.value);
-                    if (sel) onSelectTuning(sel);
+                  onChange={(event) => {
+                    const selected = allTunings.find((tuning) => tuning.id === event.target.value);
+                    if (selected) {
+                      onSelectTuning(selected);
+                    }
                   }}
-                  className="flex-1 bg-[#161b22] text-xs px-2 py-1.5 rounded border border-[#30363d] outline-none focus:border-sky-500"
+                  className="flex-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-xs outline-none focus:border-sky-500"
                 >
                   {allTunings.map((tuning) => (
                     <option key={tuning.id} value={tuning.id}>
@@ -236,40 +279,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </option>
                   ))}
                 </select>
-                <button onClick={onDuplicateTuning} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded">
+                <button onClick={onDuplicateTuning} className="rounded bg-[#21262d] p-1.5 hover:bg-[#30363d]">
                   <Copy size={14} />
                 </button>
                 {!currentTuning.isStandard && (
-                  <button onClick={onSaveTuning} className="p-1.5 bg-sky-600 hover:bg-sky-500 rounded">
+                  <button onClick={onSaveTuning} className="rounded bg-sky-600 p-1.5 hover:bg-sky-500">
                     <Save size={14} />
                   </button>
                 )}
               </div>
             </div>
 
-            <div className="flex gap-2 mt-2">
-              <button onClick={handleExportJsonPackage} className="flex-1 p-1 bg-[#21262d] hover:bg-[#30363d] rounded text-[10px] flex items-center justify-center gap-1">
-                <Download size={12} /> JSON出力
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={handleExportJsonPackage}
+                className="flex flex-1 items-center justify-center gap-1 rounded bg-[#21262d] p-1 text-[10px] hover:bg-[#30363d]"
+              >
+                <Download size={12} />
+                JSON出力
               </button>
-              <button onClick={handleExportBinaryPackage} className="flex-1 p-1 bg-[#21262d] hover:bg-[#30363d] rounded text-[10px] flex items-center justify-center gap-1 text-amber-400">
-                <Download size={12} /> BIN出力
+              <button
+                onClick={handleExportBinaryPackage}
+                className="flex flex-1 items-center justify-center gap-1 rounded bg-[#21262d] p-1 text-[10px] text-amber-400 hover:bg-[#30363d]"
+              >
+                <Download size={12} />
+                BIN出力
               </button>
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 p-1 bg-[#21262d] hover:bg-[#30363d] rounded text-[10px] flex items-center justify-center gap-1 text-sky-400">
-                <Upload size={12} /> 読込
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex flex-1 items-center justify-center gap-1 rounded bg-[#21262d] p-1 text-[10px] text-sky-400 hover:bg-[#30363d]"
+              >
+                <Upload size={12} />
+                読込
               </button>
               <input ref={fileInputRef} type="file" accept=".json,.bin" onChange={handleFileImport} className="hidden" />
             </div>
           </div>
 
           <div className="flex flex-col gap-3">
-            <h3 className="text-xs font-bold text-slate-400 tracking-wider border-b border-[#30363d] pb-1">鍵盤表示</h3>
+            <h3 className="border-b border-[#30363d] pb-1 text-xs font-bold tracking-wider text-slate-400">鍵盤表示</h3>
 
             <div className="flex flex-col gap-1">
               <label className="text-xs text-slate-200">音名表示</label>
               <select
                 value={settings.pitchLabelMode}
-                onChange={(e) => onUpdateSettings({...settings, pitchLabelMode: e.target.value as any})}
-                className="bg-[#161b22] text-xs px-2 py-1.5 rounded border border-[#30363d] outline-none"
+                onChange={(event) => onUpdateSettings({...settings, pitchLabelMode: event.target.value as any})}
+                className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-xs outline-none"
               >
                 <option value="note">音名</option>
                 <option value="doremi">ドレミ</option>
@@ -279,32 +334,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </select>
             </div>
 
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-200 mt-2">
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-200">
               <input
                 type="checkbox"
                 checked={settings.showTwoRows}
-                onChange={(e) => onUpdateSettings({...settings, showTwoRows: e.target.checked})}
-                className="w-4 h-4 rounded bg-[#161b22] border-[#30363d] text-sky-600 focus:ring-sky-500"
+                onChange={(event) => onUpdateSettings({...settings, showTwoRows: event.target.checked})}
+                className="h-4 w-4 rounded border-[#30363d] bg-[#161b22] text-sky-600 focus:ring-sky-500"
               />
               上下2段表示
             </label>
 
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-200">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-200">
               <input
                 type="checkbox"
                 checked={!!settings.showAddressBinary}
-                onChange={(e) => onUpdateSettings({...settings, showAddressBinary: e.target.checked})}
-                className="w-4 h-4 rounded bg-[#161b22] border-[#30363d] text-sky-600 focus:ring-sky-500"
+                onChange={(event) => onUpdateSettings({...settings, showAddressBinary: event.target.checked})}
+                className="h-4 w-4 rounded border-[#30363d] bg-[#161b22] text-sky-600 focus:ring-sky-500"
               />
               番地を2進/16進で表示
             </label>
 
-            <div className="flex flex-col gap-1 mt-2">
+            <div className="mt-2 flex flex-col gap-1">
               <div className="flex justify-between text-xs">
                 <span>黒鍵幅</span>
                 <span>{Math.round(settings.blackKeyWidthRatio * 100)}%</span>
               </div>
-              <input type="range" min="0.3" max="1.0" step="0.05" value={settings.blackKeyWidthRatio} onChange={(e) => onUpdateSettings({...settings, blackKeyWidthRatio: Number(e.target.value)})} className="w-full" />
+              <input
+                type="range"
+                min="0.3"
+                max="1.0"
+                step="0.05"
+                value={settings.blackKeyWidthRatio}
+                onChange={(event) => onUpdateSettings({...settings, blackKeyWidthRatio: Number(event.target.value)})}
+                className="w-full"
+              />
             </div>
 
             <div className="flex flex-col gap-1">
@@ -312,7 +375,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>黒鍵高さ</span>
                 <span>{Math.round(settings.blackKeyHeightRatio * 100)}%</span>
               </div>
-              <input type="range" min="0.3" max="0.9" step="0.05" value={settings.blackKeyHeightRatio} onChange={(e) => onUpdateSettings({...settings, blackKeyHeightRatio: Number(e.target.value)})} className="w-full" />
+              <input
+                type="range"
+                min="0.3"
+                max="0.9"
+                step="0.05"
+                value={settings.blackKeyHeightRatio}
+                onChange={(event) => onUpdateSettings({...settings, blackKeyHeightRatio: Number(event.target.value)})}
+                className="w-full"
+              />
             </div>
 
             <div className="flex flex-col gap-1">
@@ -320,21 +391,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>鍵盤幅</span>
                 <span>{settings.keyWidth}px</span>
               </div>
-              <input type="range" min="30" max="120" step="1" value={settings.keyWidth} onChange={(e) => onUpdateSettings({...settings, keyWidth: Number(e.target.value)})} className="w-full" />
+              <input
+                type="range"
+                min="30"
+                max="120"
+                step="1"
+                value={settings.keyWidth}
+                onChange={(event) => onUpdateSettings({...settings, keyWidth: Number(event.target.value)})}
+                className="w-full"
+              />
             </div>
           </div>
 
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-bold text-slate-400 tracking-wider border-b border-[#30363d] pb-1">無効区画</h3>
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-200">
-              <input type="checkbox" checked={settings.showInvalidSections} onChange={(e) => onUpdateSettings({...settings, showInvalidSections: e.target.checked})} className="w-4 h-4 rounded bg-[#161b22] border-[#30363d]" />
+            <h3 className="border-b border-[#30363d] pb-1 text-xs font-bold tracking-wider text-slate-400">無効区画</h3>
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-200">
+              <input
+                type="checkbox"
+                checked={settings.showInvalidSections}
+                onChange={(event) => onUpdateSettings({...settings, showInvalidSections: event.target.checked})}
+                className="h-4 w-4 rounded border-[#30363d] bg-[#161b22]"
+              />
               無効区画を表示
             </label>
-            <label className="text-xs font-bold text-slate-200 mt-1">無効区画モード</label>
+            <label className="mt-1 text-xs font-bold text-slate-200">無効区画モード</label>
             <select
               value={currentLayout.invalidSectionMode}
-              onChange={(e) => onUpdateLayout({...currentLayout, invalidSectionMode: e.target.value as any})}
-              className="px-2 py-1.5 bg-[#161b22] text-xs rounded border border-[#30363d] outline-none"
+              onChange={(event) => onUpdateLayout({...currentLayout, invalidSectionMode: event.target.value as any})}
+              className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-xs outline-none"
             >
               <option value="fixed">固定</option>
               <option value="compressed">圧縮</option>
@@ -342,13 +426,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <div className="flex flex-col gap-2 pb-10">
-            <h3 className="text-xs font-bold text-slate-400 tracking-wider border-b border-[#30363d] pb-1">PCキーボード</h3>
+            <h3 className="border-b border-[#30363d] pb-1 text-xs font-bold tracking-wider text-slate-400">PCキーボード</h3>
             <div className="flex flex-col gap-1">
               <div className="flex justify-between text-xs">
                 <span>depthオフセット</span>
                 <span>{settings.pcDepthOffset}</span>
               </div>
-              <input type="range" min="0" max="4" value={settings.pcDepthOffset} onChange={(e) => onUpdateSettings({...settings, pcDepthOffset: Number(e.target.value)})} className="w-full" />
+              <input
+                type="range"
+                min="0"
+                max="4"
+                value={settings.pcDepthOffset}
+                onChange={(event) => onUpdateSettings({...settings, pcDepthOffset: Number(event.target.value)})}
+                className="w-full"
+              />
             </div>
           </div>
         </div>

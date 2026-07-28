@@ -14,6 +14,12 @@ interface InteractiveKeyboardProps {
   externalPressedAddresses?: Set<number>;
 }
 
+type PointerPressState = {
+  address: number;
+  token: number;
+  voiceId?: string;
+};
+
 export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   layout,
   tuning,
@@ -24,9 +30,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   externalPressedAddresses,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pressedPointers, setPressedPointers] = useState<Map<string, {address: number; voiceId: string}>>(
-    new Map<string, {address: number; voiceId: string}>(),
-  );
+  const pressTokenRef = useRef(0);
+  const [pressedPointers, setPressedPointers] = useState<Map<string, PointerPressState>>(new Map());
+  const [visibleColumns, setVisibleColumns] = useState(16);
 
   const heldAddressSet = new Set<number>(externalPressedAddresses ?? []);
   pressedPointers.forEach(({address}) => heldAddressSet.add(address));
@@ -40,57 +46,61 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
   const getAddressFromCoordinates = useCallback(
     (clientX: number, clientY: number): number | null => {
-      if (!containerRef.current) return null;
+      if (!containerRef.current) {
+        return null;
+      }
 
       const rect = containerRef.current.getBoundingClientRect();
       const scrollLeft = containerRef.current.scrollLeft;
       const relX = clientX - rect.left + scrollLeft;
       const relY = clientY - rect.top;
       const totalHeight = rect.height;
-      const keyW = settings.keyWidth;
-      const blackH = totalHeight * settings.blackKeyHeightRatio;
-      const visibleCols = Math.max(16, Math.ceil(rect.width / keyW) + 1);
+      const keyWidth = settings.keyWidth;
+      const blackHeight = totalHeight * settings.blackKeyHeightRatio;
+      const visibleCols = Math.max(16, Math.ceil(rect.width / keyWidth) + 1);
 
-      if (relY <= blackH) {
-        for (let x = 0; x < visibleCols; x++) {
+      if (relY <= blackHeight) {
+        for (let x = 0; x < visibleCols; x += 1) {
           const activeDepths = getLaneDepths(x, true);
-          if (activeDepths === 0 && !settings.showInvalidSections) continue;
+          if (activeDepths === 0 && !settings.showInvalidSections) {
+            continue;
+          }
 
-          const blackW = keyW * settings.blackKeyWidthRatio;
-          const center = (x + 1) * keyW;
-          const blackLeft = center - blackW / 2;
-          const blackRight = center + blackW / 2;
+          const blackWidth = keyWidth * settings.blackKeyWidthRatio;
+          const center = (x + 1) * keyWidth;
+          const blackLeft = center - blackWidth / 2;
+          const blackRight = center + blackWidth / 2;
 
           if (relX >= blackLeft && relX <= blackRight) {
             return encodeAddress(
               x,
               true,
-              calculateDepthFromRatio(x, true, relY / blackH, activeDepths, layout, settings),
+              calculateDepthFromRatio(relY / blackHeight, activeDepths, settings.showInvalidSections),
             );
           }
         }
       }
 
-      const whiteXIndex = Math.floor(relX / keyW);
+      const whiteXIndex = Math.floor(relX / keyWidth);
       if (whiteXIndex >= 0 && whiteXIndex < visibleCols) {
         const activeDepths = getLaneDepths(whiteXIndex, false);
         return encodeAddress(
           whiteXIndex,
           false,
-          calculateDepthFromRatio(whiteXIndex, false, relY / totalHeight, activeDepths, layout, settings),
+          calculateDepthFromRatio(relY / totalHeight, activeDepths, settings.showInvalidSections),
         );
       }
 
       return null;
     },
-    [layout, settings],
+    [layout, settings.blackKeyHeightRatio, settings.blackKeyWidthRatio, settings.keyWidth, settings.showInvalidSections],
   );
 
   const triggerNoteOn = useCallback(
     async (address: number, pointerKey: string, velocity: number = 1.0) => {
       const period = layout.horizontalCount || 16;
       const x = Math.floor(address / 16);
-      const isBlack = (address % 16) >= 8;
+      const isBlack = address % 16 >= 8;
       const depth = address % 8;
       const baseAddress = encodeAddress(x % period, isBlack, depth);
       const octOffset = Math.floor(x / period);
@@ -102,78 +112,102 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       }
 
       const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchId, tuning);
-      if (!pitchDef) return;
+      if (!pitchDef) {
+        return;
+      }
 
-      const freq = calculateFrequency(pitchDef, tuning, octaveShift + tuningOctaveShift + octOffset);
-      const voiceId = await globalAudioEngine.noteOn(address, pitchId, freq, velocity, pointerKey);
-
+      const token = ++pressTokenRef.current;
       setPressedPointers((prev) => {
         const next = new Map(prev);
-        next.set(pointerKey, {address, voiceId});
+        next.set(pointerKey, {address, token});
         return next;
       });
 
       onSelectAddress?.(address);
+
+      const frequency = calculateFrequency(pitchDef, tuning, octaveShift + tuningOctaveShift + octOffset);
+      const voiceId = await globalAudioEngine.noteOn(address, pitchId, frequency, velocity, pointerKey);
+
+      setPressedPointers((prev) => {
+        const current = prev.get(pointerKey);
+        if (!current || current.token !== token) {
+          globalAudioEngine.noteOff(voiceId);
+          return prev;
+        }
+
+        const next = new Map(prev);
+        next.set(pointerKey, {...current, voiceId});
+        return next;
+      });
     },
     [layout, octaveShift, onSelectAddress, tuning],
   );
 
   const triggerNoteOff = useCallback((pointerKey: string) => {
     setPressedPointers((prev) => {
-      const next = new Map<string, {address: number; voiceId: string}>(prev);
-      const item = next.get(pointerKey);
-      if (item) {
-        globalAudioEngine.noteOff(item.voiceId);
-        next.delete(pointerKey);
+      const current = prev.get(pointerKey);
+      if (!current) {
+        return prev;
       }
+
+      if (current.voiceId) {
+        globalAudioEngine.noteOff(current.voiceId);
+      }
+
+      const next = new Map(prev);
+      next.delete(pointerKey);
       return next;
     });
   }, []);
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const pointerKey = `pointer_${e.pointerId}`;
-    const addr = getAddressFromCoordinates(e.clientX, e.clientY);
-    if (addr !== null) {
-      const pressure = e.pressure && e.pressure > 0 ? e.pressure : 1.0;
-      void triggerNoteOn(addr, pointerKey, pressure);
+  const handlePointerDown = (event: React.PointerEvent) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const pointerKey = `pointer_${event.pointerId}`;
+    const address = getAddressFromCoordinates(event.clientX, event.clientY);
+    if (address !== null) {
+      const pressure = event.pressure && event.pressure > 0 ? event.pressure : 1.0;
+      void triggerNoteOn(address, pointerKey, pressure);
     }
   };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!e.buttons && e.pointerType === 'mouse') return;
+  const handlePointerMove = (event: React.PointerEvent) => {
+    if (!event.buttons && event.pointerType === 'mouse') {
+      return;
+    }
 
-    const pointerKey = `pointer_${e.pointerId}`;
+    const pointerKey = `pointer_${event.pointerId}`;
     const currentItem = pressedPointers.get(pointerKey);
-    const newAddr = getAddressFromCoordinates(e.clientX, e.clientY);
+    const newAddress = getAddressFromCoordinates(event.clientX, event.clientY);
 
-    if (newAddr !== null) {
-      if (!currentItem || currentItem.address !== newAddr) {
+    if (newAddress !== null) {
+      if (!currentItem || currentItem.address !== newAddress) {
         if (currentItem) {
           triggerNoteOff(pointerKey);
         }
-        const pressure = e.pressure && e.pressure > 0 ? e.pressure : 1.0;
-        void triggerNoteOn(newAddr, pointerKey, pressure);
+        const pressure = event.pressure && event.pressure > 0 ? event.pressure : 1.0;
+        void triggerNoteOn(newAddress, pointerKey, pressure);
       }
     } else if (currentItem) {
       triggerNoteOff(pointerKey);
     }
   };
 
-  const handlePointerUp = (e: React.PointerEvent) => {
-    triggerNoteOff(`pointer_${e.pointerId}`);
+  const handlePointerUp = (event: React.PointerEvent) => {
+    triggerNoteOff(`pointer_${event.pointerId}`);
   };
 
-  const [visibleColumns, setVisibleColumns] = useState(16);
-
   React.useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current) {
+      return;
+    }
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const width = entry.contentRect.width;
         setVisibleColumns(Math.max(16, Math.ceil(width / settings.keyWidth) + 1));
       }
     });
+
     observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, [settings.keyWidth]);
@@ -187,7 +221,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     return (
       <div
         key={`white_${x}`}
-        className="relative flex flex-col border-r border-slate-400/80 bg-white select-none h-full shadow-[inset_-1px_0_2px_rgba(0,0,0,0.1)] rounded-b-md"
+        className="relative flex h-full flex-col select-none rounded-b-md border-r border-slate-400/80 bg-white shadow-[inset_-1px_0_2px_rgba(0,0,0,0.1)]"
         style={{width: `${settings.keyWidth}px`, flexShrink: 0}}
       >
         {Array.from({length: 8}, (_, idx) => {
@@ -224,28 +258,24 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`white_${x}_depth_${depth}`}
-              className={`relative flex-1 border-b border-slate-200 p-1 flex flex-col justify-between transition-colors ${
+              className={`relative flex flex-1 flex-col justify-between border-b border-slate-200 p-1 transition-colors ${
                 isPressed
-                  ? 'bg-gradient-to-b from-amber-300 to-amber-400 text-amber-950 font-bold shadow-inner'
+                  ? 'bg-gradient-to-b from-amber-300 to-amber-400 text-amber-950 shadow-inner'
                   : isSelected
-                    ? 'bg-sky-100 border-sky-400 text-sky-900 font-medium'
+                    ? 'border-sky-400 bg-sky-100 text-sky-900'
                     : isInvalid
-                      ? 'bg-slate-200/80 text-slate-400 border-slate-300'
-                      : 'hover:bg-slate-100 text-slate-800'
+                      ? 'border-slate-300 bg-slate-200/80 text-slate-400'
+                      : 'text-slate-800 hover:bg-slate-100'
               }`}
             >
-              <div className="flex justify-between items-center text-[8px] font-mono opacity-50">
+              <div className="flex items-center justify-between text-[8px] font-mono opacity-50">
                 <span>d{depth}</span>
-                {settings.showAddressBinary && (
-                  <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>
-                )}
+                {settings.showAddressBinary && <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>}
               </div>
 
-              <div className="flex justify-center items-end mb-1">
+              <div className="mb-1 flex justify-center">
                 {formattedLabel && (
-                  <span
-                    className={`px-1.5 py-0.5 rounded text-[11px] font-extrabold shadow-sm border font-sans tracking-tight leading-none ${badgeBg}`}
-                  >
+                  <span className={`rounded border px-1.5 py-0.5 text-[11px] font-extrabold leading-none tracking-tight shadow-sm ${badgeBg}`}>
                     {formattedLabel}
                   </span>
                 )}
@@ -260,7 +290,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const renderBlackKeys = () =>
     Array.from({length: visibleColumns}, (_, x) => {
       const activeDepths = getLaneDepths(x, true);
-      if (activeDepths === 0 && !settings.showInvalidSections) return null;
+      if (activeDepths === 0 && !settings.showInvalidSections) {
+        return null;
+      }
 
       const period = layout.horizontalCount || 16;
       const octOffset = Math.floor(x / period);
@@ -272,7 +304,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       return (
         <div
           key={`black_lane_${x}`}
-          className="absolute top-0 flex flex-col z-10 rounded-b-md shadow-2xl bg-gradient-to-b from-slate-900 to-black select-none overflow-hidden border-x border-b border-slate-800"
+          className="absolute top-0 z-10 flex select-none flex-col overflow-hidden rounded-b-md border-x border-b border-slate-800 bg-gradient-to-b from-slate-900 to-black shadow-2xl"
           style={{
             left: `${blackLeft}px`,
             width: `${blackWidth}px`,
@@ -301,26 +333,24 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             return (
               <div
                 key={`black_${x}_depth_${depth}`}
-                className={`relative flex-1 border-b border-slate-800 p-0.5 text-[9px] flex flex-col justify-between transition-colors ${
+                className={`relative flex flex-1 flex-col justify-between border-b border-slate-800 p-0.5 transition-colors ${
                   isPressed
-                    ? 'bg-amber-400 text-amber-950 font-bold shadow-inner border-amber-500'
+                    ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-inner'
                     : isSelected
-                      ? 'bg-sky-500 text-white font-medium border-sky-400'
+                      ? 'border-sky-400 bg-sky-500 text-white'
                       : isInvalid
-                        ? 'bg-slate-900/60 text-slate-700 border-slate-800'
-                        : 'bg-slate-900 hover:bg-slate-800 text-slate-200'
+                        ? 'border-slate-800 bg-slate-900/60 text-slate-700'
+                        : 'bg-slate-900 text-slate-200 hover:bg-slate-800'
                 }`}
               >
-                <div className="flex justify-between items-center text-[7px] font-mono opacity-40">
+                <div className="flex items-center justify-between text-[7px] font-mono opacity-40">
                   <span>d{depth}</span>
-                  {settings.showAddressBinary && (
-                    <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>
-                  )}
+                  {settings.showAddressBinary && <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>}
                 </div>
 
-                <div className="flex justify-center items-end mb-0.5">
+                <div className="mb-0.5 flex justify-center">
                   {formattedLabel && (
-                    <span className="px-1 py-0.2 rounded text-[9px] font-extrabold bg-slate-800 text-amber-300 border border-slate-700 font-sans">
+                    <span className="rounded border border-slate-700 bg-slate-800 px-1 py-[1px] text-[9px] font-extrabold text-amber-300">
                       {formattedLabel}
                     </span>
                   )}
@@ -333,10 +363,10 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     });
 
   return (
-    <div className="w-full flex flex-col h-full bg-[#0d1117] overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-[#0d1117]">
       <div
         ref={containerRef}
-        className="relative flex-1 flex overflow-x-hidden overflow-y-hidden touch-none select-none p-0 cursor-pointer"
+        className="relative flex flex-1 cursor-pointer select-none overflow-x-hidden overflow-y-hidden p-0 touch-none"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -351,19 +381,14 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   );
 };
 
-function calculateDepthFromRatio(
-  x: number,
-  isBlack: boolean,
-  topRatio: number,
-  activeDepths: number,
-  layout: LayoutPreset,
-  settings: AppSettings,
-): number {
-  if (activeDepths <= 0) return 0;
+function calculateDepthFromRatio(topRatio: number, activeDepths: number, showInvalidSections: boolean): number {
+  if (activeDepths <= 0) {
+    return 0;
+  }
 
   const clampedTopRatio = Math.max(0, Math.min(0.9999, topRatio));
 
-  if (settings.showInvalidSections) {
+  if (showInvalidSections) {
     const idxFromTop = Math.floor(clampedTopRatio * 8);
     return Math.max(0, Math.min(7, 7 - idxFromTop));
   }
