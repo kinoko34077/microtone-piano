@@ -11,6 +11,7 @@ import {storageService, DEFAULT_APP_SETTINGS} from './core/storage';
 import {globalAudioEngine} from './core/audio';
 import {calculateFrequency, resolvePitch} from './core/pitch';
 import {keyToAddress} from './core/pcKeyboard';
+import {getKeyboardColumnRange} from './core/keyboardRange';
 import {setPianoSampleOverrides} from './core/pianoSamples';
 import {Sidebar} from './components/Sidebar';
 import {InteractiveKeyboard} from './components/Keyboard/InteractiveKeyboard';
@@ -23,7 +24,6 @@ type PressedPcKey = {
 };
 
 const MAX_OCTAVE_OFFSET = 5;
-const MAX_SCROLL_OFFSET = 15;
 
 function clampOctaveOffset(value: number): number {
   return Math.min(MAX_OCTAVE_OFFSET, value);
@@ -33,13 +33,15 @@ function clampScrollOffset(value: number | undefined): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
-  return Math.max(0, Math.min(MAX_SCROLL_OFFSET, value ?? 0));
+  return Math.max(0, value ?? 0);
 }
 
 function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     ...DEFAULT_APP_SETTINGS,
     ...settings,
+    upperKeyWidth: settings.upperKeyWidth ?? settings.keyWidth ?? DEFAULT_APP_SETTINGS.upperKeyWidth,
+    lowerKeyWidth: settings.lowerKeyWidth ?? settings.keyWidth ?? DEFAULT_APP_SETTINGS.lowerKeyWidth,
     upperOctaveOffset: clampOctaveOffset(settings.upperOctaveOffset ?? DEFAULT_APP_SETTINGS.upperOctaveOffset),
     lowerOctaveOffset: clampOctaveOffset(settings.lowerOctaveOffset ?? DEFAULT_APP_SETTINGS.lowerOctaveOffset),
     upperScrollOffset: clampScrollOffset(settings.upperScrollOffset),
@@ -55,11 +57,19 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(normalizeSettings(DEFAULT_APP_SETTINGS));
   const [activeMode, setActiveMode] = useState<'keyboard' | 'editor'>('keyboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [selectedAddress, setSelectedAddress] = useState<number | null>(null);
+  const [editorSelectedAddress, setEditorSelectedAddress] = useState<number | null>(null);
   const [notices, setNotices] = useState<OutOfRangeNotice[]>([]);
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
   const [settingsReady, setSettingsReady] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
+  const upperColumnRange = useMemo(
+    () => getKeyboardColumnRange(currentLayout, currentTuning, settings.upperOctaveOffset ?? 1),
+    [currentLayout, currentTuning, settings.upperOctaveOffset],
+  );
+  const lowerColumnRange = useMemo(
+    () => getKeyboardColumnRange(currentLayout, currentTuning, settings.lowerOctaveOffset ?? 0),
+    [currentLayout, currentTuning, settings.lowerOctaveOffset],
+  );
 
   useEffect(() => {
     const initData = async () => {
@@ -111,6 +121,22 @@ export default function App() {
       }
     };
   }, [settings, settingsReady]);
+
+  useEffect(() => {
+    const nextUpper = Math.min(settings.upperScrollOffset ?? 0, upperColumnRange.maxScrollOffset);
+    const nextLower = Math.min(settings.lowerScrollOffset ?? 0, lowerColumnRange.maxScrollOffset);
+    if (nextUpper === (settings.upperScrollOffset ?? 0) && nextLower === (settings.lowerScrollOffset ?? 0)) {
+      return;
+    }
+
+    setSettings((prev) =>
+      normalizeSettings({
+        ...prev,
+        upperScrollOffset: nextUpper,
+        lowerScrollOffset: nextLower,
+      }),
+    );
+  }, [lowerColumnRange.maxScrollOffset, settings.lowerScrollOffset, settings.upperScrollOffset, upperColumnRange.maxScrollOffset]);
 
   const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
     const normalized = normalizeSettings(newSettings);
@@ -272,7 +298,7 @@ export default function App() {
       const frequency = calculateFrequency(pitchDef, currentTuning, octaveShift);
       const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, 1.0, `pc_${event.key}`);
       setPcPressedMap((prev) => new Map(prev).set(event.key, {voiceId, address}));
-      setSelectedAddress(address);
+      setEditorSelectedAddress(address);
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -327,6 +353,8 @@ export default function App() {
     pcPressedMap.forEach(({address}) => next.add(address));
     return next;
   }, [pcPressedMap]);
+  const upperScrollOffset = Math.min(settings.upperScrollOffset ?? 0, upperColumnRange.maxScrollOffset);
+  const lowerScrollOffset = Math.min(settings.lowerScrollOffset ?? 0, lowerColumnRange.maxScrollOffset);
 
   return (
     <div className="app-shell relative flex flex-col overflow-hidden bg-[#0d1117] font-sans text-slate-100">
@@ -389,21 +417,20 @@ export default function App() {
                   label="上段"
                   octaveOffset={settings.upperOctaveOffset ?? 1}
                   onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, upperOctaveOffset: offset})}
-                  scrollOffset={settings.upperScrollOffset ?? 0}
+                  scrollOffset={upperScrollOffset}
                   onChangeScrollOffset={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
-                  keyWidth={settings.keyWidth}
-                  onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width})}
+                  maxScrollOffset={upperColumnRange.maxScrollOffset}
+                  keyWidth={settings.upperKeyWidth ?? settings.keyWidth}
+                  onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width, upperKeyWidth: width})}
                 />
                 <div className="relative min-h-0 flex-1">
                   <InteractiveKeyboard
                     layout={currentLayout}
                     tuning={currentTuning}
-                    settings={settings}
+                    settings={{...settings, keyWidth: settings.upperKeyWidth ?? settings.keyWidth}}
                     octaveShift={settings.upperOctaveOffset ?? 1}
-                    scrollOffsetColumns={settings.upperScrollOffset ?? 0}
+                    scrollOffsetColumns={upperScrollOffset}
                     onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
-                    selectedAddress={selectedAddress}
-                    onSelectAddress={setSelectedAddress}
                     externalPressedAddresses={pressedAddressSet}
                   />
                 </div>
@@ -415,21 +442,20 @@ export default function App() {
                 label={settings.showTwoRows ? '下段' : undefined}
                 octaveOffset={settings.lowerOctaveOffset ?? 0}
                 onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, lowerOctaveOffset: offset})}
-                scrollOffset={settings.lowerScrollOffset ?? 0}
+                scrollOffset={lowerScrollOffset}
                 onChangeScrollOffset={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
-                keyWidth={settings.keyWidth}
-                onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width})}
+                maxScrollOffset={lowerColumnRange.maxScrollOffset}
+                keyWidth={settings.lowerKeyWidth ?? settings.keyWidth}
+                onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width, lowerKeyWidth: width})}
               />
               <div className="relative min-h-0 flex-1">
                 <InteractiveKeyboard
                   layout={currentLayout}
                   tuning={currentTuning}
-                  settings={settings}
+                  settings={{...settings, keyWidth: settings.lowerKeyWidth ?? settings.keyWidth}}
                   octaveShift={settings.lowerOctaveOffset ?? 0}
-                  scrollOffsetColumns={settings.lowerScrollOffset ?? 0}
+                  scrollOffsetColumns={lowerScrollOffset}
                   onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
-                  selectedAddress={selectedAddress}
-                  onSelectAddress={setSelectedAddress}
                   externalPressedAddresses={pressedAddressSet}
                 />
               </div>
@@ -445,8 +471,8 @@ export default function App() {
             onUpdateLayout={handleUpdateLayout}
             onUpdateTuning={handleUpdateTuning}
             onUpdateSettings={handleUpdateSettings}
-            selectedAddress={selectedAddress}
-            onSelectAddress={setSelectedAddress}
+            selectedAddress={editorSelectedAddress}
+            onSelectAddress={setEditorSelectedAddress}
           />
         )}
       </main>

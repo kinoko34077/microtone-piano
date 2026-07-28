@@ -63,6 +63,8 @@ export interface AppSettings {
   sustainLatch: boolean;
   sustainMomentary?: boolean;
   keyWidth: number;
+  upperKeyWidth?: number;
+  lowerKeyWidth?: number;
   visibleKeysCount: number;
   upperScrollOffset?: number;
   lowerScrollOffset?: number;

@@ -20,6 +20,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pianoSampleOverrides: undefined,
   sustainLatch: false,
   keyWidth: 60,
+  upperKeyWidth: 60,
+  lowerKeyWidth: 60,
   visibleKeysCount: 8,
   upperScrollOffset: 0,
   lowerScrollOffset: 0,

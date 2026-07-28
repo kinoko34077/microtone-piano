@@ -134,7 +134,7 @@ export function getFormattedPitchLabel(
   const shiftedStep = rawStep + octaveShift * edo;
 
   if (mode === 'step') {
-    return `S${shiftedStep}`;
+    return `S${rawStep}`;
   }
 
   const cycleLength = pitchCount > 0 ? pitchCount : 12;

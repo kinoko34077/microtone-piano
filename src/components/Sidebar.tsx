@@ -384,14 +384,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
             </RangeBlock>
 
-            <RangeBlock label="鍵盤幅" valueLabel={`${settings.keyWidth}px`}>
+            <RangeBlock
+              label="鍵盤幅"
+              valueLabel={
+                settings.showTwoRows &&
+                (settings.upperKeyWidth ?? settings.keyWidth) !== (settings.lowerKeyWidth ?? settings.keyWidth)
+                  ? `上 ${settings.upperKeyWidth ?? settings.keyWidth}px / 下 ${settings.lowerKeyWidth ?? settings.keyWidth}px`
+                  : `${settings.keyWidth}px`
+              }
+            >
               <input
                 type="range"
-                min="30"
+                min="24"
                 max="120"
                 step="1"
                 value={settings.keyWidth}
-                onChange={(event) => onUpdateSettings({...settings, keyWidth: Number(event.target.value)})}
+                onChange={(event) => {
+                  const width = Number(event.target.value);
+                  onUpdateSettings({...settings, keyWidth: width, upperKeyWidth: width, lowerKeyWidth: width});
+                }}
                 className="w-full"
               />
             </RangeBlock>
