@@ -94,7 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       } else if (data?.pitches) {
         onSelectTuning(data);
       } else {
-        alert('未対応のファイル形式です。');
+        alert('対応していないファイル形式です。');
       }
     } catch (error: any) {
       alert(`読み込みエラー: ${error.message}`);
@@ -112,7 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#30363d] bg-[#0d1117] p-3">
           <div className="flex flex-col">
             <h2 className="flex items-center gap-2 font-bold text-sky-400">
-              <span>多段微分音Web鍵盤</span>
+              <span>多段微分音 Web 鍵盤</span>
               <span className="rounded border border-sky-800 bg-sky-950 px-1.5 py-0.5 text-[10px] text-sky-300">v1.2</span>
             </h2>
             <p className="text-[10px] text-slate-400">微分音鍵盤の設定</p>
@@ -181,10 +181,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               onClick={() => globalAudioEngine.allNotesOff()}
               className="flex items-center justify-center gap-2 rounded-lg bg-rose-900/50 px-3 py-2 text-rose-300 hover:bg-rose-900"
-              title="全音停止"
+              title="全発音停止"
             >
               <VolumeX size={18} />
-              <span className="text-xs font-bold">全音停止</span>
+              <span className="text-xs font-bold">全発音停止</span>
             </button>
 
             <label className="mt-2 text-xs font-bold text-slate-200">音源</label>
@@ -341,7 +341,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onChange={(event) => onUpdateSettings({...settings, showTwoRows: event.target.checked})}
                 className="h-4 w-4 rounded border-[#30363d] bg-[#161b22] text-sky-600 focus:ring-sky-500"
               />
-              上下2段表示
+              2段表示
             </label>
 
             <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-slate-200">
@@ -351,14 +351,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onChange={(event) => onUpdateSettings({...settings, showAddressBinary: event.target.checked})}
                 className="h-4 w-4 rounded border-[#30363d] bg-[#161b22] text-sky-600 focus:ring-sky-500"
               />
-              番地を2進/16進で表示
+              番地を16進で表示
             </label>
 
-            <div className="mt-2 flex flex-col gap-1">
-              <div className="flex justify-between text-xs">
-                <span>黒鍵幅</span>
-                <span>{Math.round(settings.blackKeyWidthRatio * 100)}%</span>
-              </div>
+            <RangeBlock
+              label="黒鍵幅"
+              valueLabel={`${Math.round(settings.blackKeyWidthRatio * 100)}%`}
+            >
               <input
                 type="range"
                 min="0.3"
@@ -368,13 +367,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onChange={(event) => onUpdateSettings({...settings, blackKeyWidthRatio: Number(event.target.value)})}
                 className="w-full"
               />
-            </div>
+            </RangeBlock>
 
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between text-xs">
-                <span>黒鍵高さ</span>
-                <span>{Math.round(settings.blackKeyHeightRatio * 100)}%</span>
-              </div>
+            <RangeBlock
+              label="黒鍵高さ"
+              valueLabel={`${Math.round(settings.blackKeyHeightRatio * 100)}%`}
+            >
               <input
                 type="range"
                 min="0.3"
@@ -384,13 +382,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onChange={(event) => onUpdateSettings({...settings, blackKeyHeightRatio: Number(event.target.value)})}
                 className="w-full"
               />
-            </div>
+            </RangeBlock>
 
-            <div className="flex flex-col gap-1">
-              <div className="flex justify-between text-xs">
-                <span>鍵盤幅</span>
-                <span>{settings.keyWidth}px</span>
-              </div>
+            <RangeBlock label="鍵盤幅" valueLabel={`${settings.keyWidth}px`}>
               <input
                 type="range"
                 min="30"
@@ -400,7 +394,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onChange={(event) => onUpdateSettings({...settings, keyWidth: Number(event.target.value)})}
                 className="w-full"
               />
-            </div>
+            </RangeBlock>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -422,6 +416,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             >
               <option value="fixed">固定</option>
               <option value="compressed">圧縮</option>
+              <option value="custom">カスタム</option>
             </select>
           </div>
 
@@ -429,7 +424,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <h3 className="border-b border-[#30363d] pb-1 text-xs font-bold tracking-wider text-slate-400">PCキーボード</h3>
             <div className="flex flex-col gap-1">
               <div className="flex justify-between text-xs">
-                <span>depthオフセット</span>
+                <span>depth オフセット</span>
                 <span>{settings.pcDepthOffset}</span>
               </div>
               <input
@@ -447,3 +442,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
+
+const RangeBlock: React.FC<{
+  label: string;
+  valueLabel: string;
+  children: React.ReactNode;
+}> = ({label, valueLabel, children}) => (
+  <div className="flex flex-col gap-1">
+    <div className="flex justify-between text-xs">
+      <span>{label}</span>
+      <span>{valueLabel}</span>
+    </div>
+    {children}
+  </div>
+);
