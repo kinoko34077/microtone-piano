@@ -1,4 +1,4 @@
-type PianoSampleRow = [fileName: string, baseFrequency: number, noteLabel: string];
+export type PianoSampleRow = [fileName: string, baseFrequency: number, noteLabel: string];
 
 export interface PianoSampleDefinition {
   id: string;
@@ -8,12 +8,14 @@ export interface PianoSampleDefinition {
   noteLabel: string;
 }
 
+export type PianoSampleOverrideMap = Record<string, {baseFrequency: number; noteLabel: string}>;
+
 const sampleUrls = import.meta.glob('../../Grand Piano/*.wav', {
   eager: true,
   import: 'default',
 }) as Record<string, string>;
 
-const analyzedSampleRows: PianoSampleRow[] = [
+export const DEFAULT_PIANO_SAMPLE_ROWS: PianoSampleRow[] = [
   ['FL Piano (1).wav', 27.56, 'A0'],
   ['FL Piano (2).wav', 29.21, 'A#0'],
   ['FL Piano (3).wav', 58.33, 'A#1'],
@@ -61,18 +63,23 @@ const analyzedSampleRows: PianoSampleRow[] = [
   ['FL Piano (45).wav', 832.08, 'G#5'],
 ];
 
-const analyzedSampleMap = new Map(
-  analyzedSampleRows.map(([fileName, baseFrequency, noteLabel]) => [fileName, {baseFrequency, noteLabel}])
+const DEFAULT_SAMPLE_MAP = new Map(
+  DEFAULT_PIANO_SAMPLE_ROWS.map(([fileName, baseFrequency, noteLabel]) => [fileName, {baseFrequency, noteLabel}]),
 );
 
-export const PIANO_SAMPLES: PianoSampleDefinition[] = Object.entries(sampleUrls)
+function getNumericSampleOrder(fileName: string): number {
+  const match = fileName.match(/\((\d+)\)\.wav$/i);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+const SAMPLE_CATALOG: PianoSampleDefinition[] = Object.entries(sampleUrls)
   .map(([path, url]) => {
     const fileName = path.split('/').pop();
     if (!fileName) {
       return null;
     }
 
-    const analyzed = analyzedSampleMap.get(fileName);
+    const analyzed = DEFAULT_SAMPLE_MAP.get(fileName);
     if (!analyzed) {
       return null;
     }
@@ -86,17 +93,53 @@ export const PIANO_SAMPLES: PianoSampleDefinition[] = Object.entries(sampleUrls)
     };
   })
   .filter((sample): sample is PianoSampleDefinition => sample !== null)
-  .sort((a, b) => a.baseFrequency - b.baseFrequency);
+  .sort((a, b) => getNumericSampleOrder(a.fileName) - getNumericSampleOrder(b.fileName));
+
+let activePianoSamples: PianoSampleDefinition[] = SAMPLE_CATALOG.map((sample) => ({...sample}));
+
+export function buildPianoSamples(overrides?: PianoSampleOverrideMap): PianoSampleDefinition[] {
+  return SAMPLE_CATALOG
+    .map((sample) => {
+      const override = overrides?.[sample.fileName];
+      return {
+        ...sample,
+        baseFrequency: override?.baseFrequency ?? sample.baseFrequency,
+        noteLabel: override?.noteLabel ?? sample.noteLabel,
+      };
+    })
+    .sort((a, b) => a.baseFrequency - b.baseFrequency);
+}
+
+export function setPianoSampleOverrides(overrides?: PianoSampleOverrideMap) {
+  activePianoSamples = buildPianoSamples(overrides);
+}
+
+export function getPianoSampleCatalog(): PianoSampleDefinition[] {
+  return SAMPLE_CATALOG.map((sample) => ({...sample}));
+}
+
+export function getActivePianoSamples(): PianoSampleDefinition[] {
+  return activePianoSamples.map((sample) => ({...sample}));
+}
+
+export function getDefaultPianoSampleOverrideMap(): PianoSampleOverrideMap {
+  return Object.fromEntries(
+    DEFAULT_PIANO_SAMPLE_ROWS.map(([fileName, baseFrequency, noteLabel]) => [
+      fileName,
+      {baseFrequency, noteLabel},
+    ]),
+  );
+}
 
 export function findNearestPianoSample(targetFrequency: number): PianoSampleDefinition | null {
-  if (!PIANO_SAMPLES.length || targetFrequency <= 0) {
+  if (!activePianoSamples.length || targetFrequency <= 0) {
     return null;
   }
 
-  let nearest = PIANO_SAMPLES[0];
+  let nearest = activePianoSamples[0];
   let nearestDistance = Infinity;
 
-  for (const sample of PIANO_SAMPLES) {
+  for (const sample of activePianoSamples) {
     const distance = Math.abs(Math.log2(targetFrequency / sample.baseFrequency));
     if (distance < nearestDistance) {
       nearest = sample;

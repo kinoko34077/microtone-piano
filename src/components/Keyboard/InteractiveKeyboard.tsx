@@ -1,4 +1,4 @@
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {LayoutPreset, TuningPreset, AppSettings, LaneConfig} from '../../types/keyboard';
 import {encodeAddress} from '../../core/address';
 import {calculateFrequency, getFormattedPitchLabel, resolvePitch} from '../../core/pitch';
@@ -10,6 +10,8 @@ interface InteractiveKeyboardProps {
   tuning: TuningPreset;
   settings: AppSettings;
   octaveShift?: number;
+  scrollOffsetColumns?: number;
+  onChangeScrollOffsetColumns?: (offset: number) => void;
   selectedAddress?: number | null;
   onSelectAddress?: (addr: number) => void;
   externalPressedAddresses?: Set<number>;
@@ -27,11 +29,15 @@ type SegmentRenderInfo = {
   isInvalid: boolean;
 };
 
+const TOTAL_COLUMNS = 16;
+
 export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   layout,
   tuning,
   settings,
   octaveShift = 0,
+  scrollOffsetColumns = 0,
+  onChangeScrollOffsetColumns,
   selectedAddress,
   onSelectAddress,
   externalPressedAddresses,
@@ -39,7 +45,6 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const pressTokenRef = useRef(0);
   const [pressedPointers, setPressedPointers] = useState<Map<string, PointerPressState>>(new Map());
-  const [visibleColumns, setVisibleColumns] = useState(16);
 
   const heldAddressSet = useMemo(() => {
     const set = new Set<number>(externalPressedAddresses ?? []);
@@ -49,7 +54,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
   const getLane = useCallback(
     (x: number, isBlack: boolean): LaneConfig | undefined => {
-      const period = layout.horizontalCount || 16;
+      const period = layout.horizontalCount || TOTAL_COLUMNS;
       const laneIdx = (x % period) * 2 + (isBlack ? 1 : 0);
       return layout.lanes[laneIdx];
     },
@@ -69,10 +74,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       const totalHeight = rect.height;
       const keyWidth = settings.keyWidth;
       const blackHeight = totalHeight * settings.blackKeyHeightRatio;
-      const visibleCols = Math.max(16, Math.ceil(rect.width / keyWidth) + 1);
 
       if (relY <= blackHeight) {
-        for (let x = 0; x < visibleCols; x += 1) {
+        for (let x = 0; x < TOTAL_COLUMNS; x += 1) {
           const lane = getLane(x, true);
           const activeDepths = lane?.activeDepths ?? 0;
           if (activeDepths === 0 && !settings.showInvalidSections) {
@@ -100,7 +104,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       }
 
       const whiteXIndex = Math.floor(relX / keyWidth);
-      if (whiteXIndex >= 0 && whiteXIndex < visibleCols) {
+      if (whiteXIndex >= 0 && whiteXIndex < TOTAL_COLUMNS) {
         const lane = getLane(whiteXIndex, false);
         const activeDepths = lane?.activeDepths ?? 0;
         return encodeAddress(
@@ -122,7 +126,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
   const triggerNoteOn = useCallback(
     async (address: number, pointerKey: string, velocity: number = 1.0) => {
-      const period = layout.horizontalCount || 16;
+      const period = layout.horizontalCount || TOTAL_COLUMNS;
       const x = Math.floor(address / 16);
       const isBlack = address % 16 >= 8;
       const depth = address % 8;
@@ -220,26 +224,24 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     triggerNoteOff(`pointer_${event.pointerId}`);
   };
 
-  React.useEffect(() => {
+  const handleScroll = useCallback(() => {
+    if (!containerRef.current || !onChangeScrollOffsetColumns) {
+      return;
+    }
+    onChangeScrollOffsetColumns(containerRef.current.scrollLeft / settings.keyWidth);
+  }, [onChangeScrollOffsetColumns, settings.keyWidth]);
+
+  useEffect(() => {
     if (!containerRef.current) {
       return;
     }
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const width = entry.contentRect.width;
-        setVisibleColumns(Math.max(16, Math.ceil(width / settings.keyWidth) + 1));
-      }
-    });
-
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [settings.keyWidth]);
+    containerRef.current.scrollLeft = Math.max(0, scrollOffsetColumns) * settings.keyWidth;
+  }, [scrollOffsetColumns, settings.keyWidth]);
 
   const renderWhiteKey = (x: number) => {
     const lane = getLane(x, false);
     const activeDepths = lane?.activeDepths ?? 0;
-    const period = layout.horizontalCount || 16;
+    const period = layout.horizontalCount || TOTAL_COLUMNS;
     const octOffset = Math.floor(x / period);
     const baseX = x % period;
     const segments = getRenderedSegments(activeDepths, lane, layout, settings.showInvalidSections);
@@ -308,14 +310,14 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   };
 
   const renderBlackKeys = () =>
-    Array.from({length: visibleColumns}, (_, x) => {
+    Array.from({length: TOTAL_COLUMNS}, (_, x) => {
       const lane = getLane(x, true);
       const activeDepths = lane?.activeDepths ?? 0;
       if (activeDepths === 0 && !settings.showInvalidSections) {
         return null;
       }
 
-      const period = layout.horizontalCount || 16;
+      const period = layout.horizontalCount || TOTAL_COLUMNS;
       const octOffset = Math.floor(x / period);
       const baseX = x % period;
       const blackWidth = settings.keyWidth * settings.blackKeyWidthRatio;
@@ -382,14 +384,22 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     <div className="flex h-full w-full flex-col overflow-hidden bg-[#0d1117]">
       <div
         ref={containerRef}
-        className="relative flex flex-1 cursor-pointer select-none overflow-x-hidden overflow-y-hidden p-0 touch-none"
+        className="relative flex flex-1 cursor-pointer select-none overflow-x-auto overflow-y-hidden p-0 touch-none"
+        onScroll={handleScroll}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
-        <div className="relative flex h-full w-full">
-          {Array.from({length: visibleColumns}, (_, x) => renderWhiteKey(x))}
+        <div
+          className="relative flex h-full"
+          style={{
+            width: `${settings.keyWidth * TOTAL_COLUMNS + settings.keyWidth * settings.blackKeyWidthRatio}px`,
+            minWidth: `${settings.keyWidth * TOTAL_COLUMNS + settings.keyWidth * settings.blackKeyWidthRatio}px`,
+            paddingRight: `${(settings.keyWidth * settings.blackKeyWidthRatio) / 2}px`,
+          }}
+        >
+          {Array.from({length: TOTAL_COLUMNS}, (_, x) => renderWhiteKey(x))}
           {renderBlackKeys()}
         </div>
       </div>

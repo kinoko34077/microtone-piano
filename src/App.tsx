@@ -11,6 +11,7 @@ import {storageService, DEFAULT_APP_SETTINGS} from './core/storage';
 import {globalAudioEngine} from './core/audio';
 import {calculateFrequency, resolvePitch} from './core/pitch';
 import {keyToAddress} from './core/pcKeyboard';
+import {setPianoSampleOverrides} from './core/pianoSamples';
 import {Sidebar} from './components/Sidebar';
 import {InteractiveKeyboard} from './components/Keyboard/InteractiveKeyboard';
 import {OctaveBar} from './components/Keyboard/OctaveBar';
@@ -22,16 +23,27 @@ type PressedPcKey = {
 };
 
 const MAX_OCTAVE_OFFSET = 5;
+const MAX_SCROLL_OFFSET = 15;
 
 function clampOctaveOffset(value: number): number {
   return Math.min(MAX_OCTAVE_OFFSET, value);
 }
 
+function clampScrollOffset(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(MAX_SCROLL_OFFSET, value ?? 0));
+}
+
 function normalizeSettings(settings: AppSettings): AppSettings {
   return {
+    ...DEFAULT_APP_SETTINGS,
     ...settings,
     upperOctaveOffset: clampOctaveOffset(settings.upperOctaveOffset ?? DEFAULT_APP_SETTINGS.upperOctaveOffset),
     lowerOctaveOffset: clampOctaveOffset(settings.lowerOctaveOffset ?? DEFAULT_APP_SETTINGS.lowerOctaveOffset),
+    upperScrollOffset: clampScrollOffset(settings.upperScrollOffset),
+    lowerScrollOffset: clampScrollOffset(settings.lowerScrollOffset),
   };
 }
 
@@ -40,7 +52,7 @@ export default function App() {
   const [allTunings, setAllTunings] = useState<TuningPreset[]>(ALL_STANDARD_TUNINGS);
   const [currentLayout, setCurrentLayout] = useState<LayoutPreset>(STANDARD_LAYOUT_12EDO);
   const [currentTuning, setCurrentTuning] = useState<TuningPreset>(STANDARD_TUNING_12EDO);
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(normalizeSettings(DEFAULT_APP_SETTINGS));
   const [activeMode, setActiveMode] = useState<'keyboard' | 'editor'>('keyboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState<number | null>(null);
@@ -62,11 +74,9 @@ export default function App() {
       globalAudioEngine.setMasterVolume(loadedSettings.masterVolume);
       globalAudioEngine.setNoteDecayMs(loadedSettings.noteDecayMs ?? 0);
       globalAudioEngine.setSustain(loadedSettings.sustainLatch);
+      setPianoSampleOverrides(loadedSettings.pianoSampleOverrides);
 
-      if (
-        loadedSettings.upperOctaveOffset !== rawSettings.upperOctaveOffset ||
-        loadedSettings.lowerOctaveOffset !== rawSettings.lowerOctaveOffset
-      ) {
+      if (JSON.stringify(loadedSettings) !== JSON.stringify(rawSettings)) {
         void storageService.saveSettings(loadedSettings);
       }
     };
@@ -81,6 +91,7 @@ export default function App() {
   const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
     const normalized = normalizeSettings(newSettings);
     setSettings(normalized);
+    setPianoSampleOverrides(normalized.pianoSampleOverrides);
     void storageService.saveSettings(normalized);
   }, []);
 
@@ -99,7 +110,7 @@ export default function App() {
     const dup: LayoutPreset = {
       ...currentLayout,
       id: `layout_custom_${Date.now()}`,
-      name: `${currentLayout.name}（複製）`,
+      name: `${currentLayout.name} コピー`,
       isStandard: false,
     };
     setAllLayouts((prev) => [...prev, dup]);
@@ -119,7 +130,7 @@ export default function App() {
     const dup: TuningPreset = {
       ...currentTuning,
       id: `tuning_custom_${Date.now()}`,
-      name: `${currentTuning.name}（複製）`,
+      name: `${currentTuning.name} コピー`,
       isStandard: false,
     };
     setAllTunings((prev) => [...prev, dup]);
@@ -159,7 +170,7 @@ export default function App() {
       const dup: LayoutPreset = storageService.deepClone({
         ...newLayout,
         id: `layout_custom_${Date.now()}`,
-        name: `${newLayout.name}（カスタム）`,
+        name: `${newLayout.name} カスタム`,
         isStandard: false,
       });
       setAllLayouts((prev) => [...prev, dup]);
@@ -178,7 +189,7 @@ export default function App() {
       const dup: TuningPreset = storageService.deepClone({
         ...newTuning,
         id: `tuning_custom_${Date.now()}`,
-        name: `${newTuning.name}（カスタム）`,
+        name: `${newTuning.name} カスタム`,
         isStandard: false,
       });
       setAllTunings((prev) => [...prev, dup]);
@@ -295,7 +306,7 @@ export default function App() {
   }, [pcPressedMap]);
 
   return (
-    <div className="app-shell relative flex flex-col overflow-hidden bg-[#0d1117] text-slate-100 font-sans">
+    <div className="app-shell relative flex flex-col overflow-hidden bg-[#0d1117] font-sans text-slate-100">
       <button
         onClick={handleToggleSustainLatch}
         className={`app-sustain-button fixed z-30 rounded-md border px-2 py-1 text-[11px] font-bold uppercase tracking-wide shadow-xl transition-all backdrop-blur-sm ${
@@ -311,7 +322,7 @@ export default function App() {
       <button
         onClick={handleAllNotesOff}
         className="app-allnotes-button fixed z-30 rounded-md border border-[#30363d] bg-[#161b22]/90 px-2 py-1 text-[11px] text-slate-300 shadow-xl transition-all backdrop-blur-sm hover:bg-[#21262d]"
-        title="全音停止"
+        title="発音リセット"
       >
         <VolumeX size={12} />
       </button>
@@ -355,6 +366,8 @@ export default function App() {
                   label="上段"
                   octaveOffset={settings.upperOctaveOffset ?? 1}
                   onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, upperOctaveOffset: offset})}
+                  scrollOffset={settings.upperScrollOffset ?? 0}
+                  onChangeScrollOffset={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
                   keyWidth={settings.keyWidth}
                   onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width})}
                 />
@@ -364,6 +377,8 @@ export default function App() {
                     tuning={currentTuning}
                     settings={settings}
                     octaveShift={settings.upperOctaveOffset ?? 1}
+                    scrollOffsetColumns={settings.upperScrollOffset ?? 0}
+                    onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
                     selectedAddress={selectedAddress}
                     onSelectAddress={setSelectedAddress}
                     externalPressedAddresses={pressedAddressSet}
@@ -377,6 +392,8 @@ export default function App() {
                 label={settings.showTwoRows ? '下段' : undefined}
                 octaveOffset={settings.lowerOctaveOffset ?? 0}
                 onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, lowerOctaveOffset: offset})}
+                scrollOffset={settings.lowerScrollOffset ?? 0}
+                onChangeScrollOffset={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
                 keyWidth={settings.keyWidth}
                 onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width})}
               />
@@ -386,6 +403,8 @@ export default function App() {
                   tuning={currentTuning}
                   settings={settings}
                   octaveShift={settings.lowerOctaveOffset ?? 0}
+                  scrollOffsetColumns={settings.lowerScrollOffset ?? 0}
+                  onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
                   selectedAddress={selectedAddress}
                   onSelectAddress={setSelectedAddress}
                   externalPressedAddresses={pressedAddressSet}

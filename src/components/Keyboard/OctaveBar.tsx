@@ -5,23 +5,32 @@ interface OctaveBarProps {
   label?: string;
   octaveOffset: number;
   onChangeOctaveOffset: (offset: number) => void;
+  scrollOffset: number;
+  onChangeScrollOffset: (offset: number) => void;
   keyWidth: number;
   onChangeKeyWidth: (width: number) => void;
 }
+
+const SCROLL_STEP = 0.25;
+const SCROLL_MAX = 15;
 
 export const OctaveBar: React.FC<OctaveBarProps> = ({
   label,
   octaveOffset,
   onChangeOctaveOffset,
+  scrollOffset,
+  onChangeScrollOffset,
   keyWidth,
   onChangeKeyWidth,
 }) => {
-  return (
-    <div className="flex select-none items-center justify-between border-b border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs">
-      <div className="flex items-center gap-1.5">
-        {label && <span className="mr-1 text-[11px] font-bold text-sky-400">{label}</span>}
-        <span className="text-[10px] font-medium text-slate-400">オクターブ</span>
+  const clampedScroll = Math.max(0, Math.min(SCROLL_MAX, scrollOffset));
 
+  return (
+    <div className="flex select-none flex-wrap items-center justify-between gap-2 border-b border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {label && <span className="mr-1 text-[11px] font-bold text-sky-400">{label}</span>}
+
+        <span className="text-[10px] font-medium text-slate-400">オクターブ</span>
         <button
           onClick={() => onChangeOctaveOffset(octaveOffset - 1)}
           className="rounded border border-[#30363d] bg-[#21262d] p-1 text-slate-200 transition-colors hover:bg-slate-700"
@@ -29,11 +38,9 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
         >
           <ChevronLeft className="h-3.5 w-3.5" />
         </button>
-
         <div className="flex min-w-[50px] items-center justify-center gap-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5 font-mono font-bold text-sky-300">
           {octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset} oct
         </div>
-
         <button
           onClick={() => onChangeOctaveOffset(octaveOffset + 1)}
           className="rounded border border-[#30363d] bg-[#21262d] p-1 text-slate-200 transition-colors hover:bg-slate-700"
@@ -42,24 +49,39 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
           <ChevronRight className="h-3.5 w-3.5" />
         </button>
 
-        <div className="ml-1 hidden items-center gap-1 sm:flex">
-          {[-2, -1, 0, 1, 2].map((value) => (
-            <button
-              key={`quick_oct_${value}`}
-              onClick={() => onChangeOctaveOffset(value)}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-mono font-semibold transition-colors ${
-                octaveOffset === value
-                  ? 'bg-sky-600 font-bold text-white'
-                  : 'border border-[#30363d] bg-[#161b22] text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              {value > 0 ? `+${value}` : value}
-            </button>
-          ))}
+        <span className="ml-2 text-[10px] font-medium text-slate-400">表示位置</span>
+        <button
+          onClick={() => onChangeScrollOffset(clampedScroll - SCROLL_STEP)}
+          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
+          title="少し左へ"
+        >
+          -0.25
+        </button>
+        <div className="flex min-w-[64px] items-center justify-center gap-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5 font-mono font-bold text-emerald-300">
+          {clampedScroll.toFixed(2)}
         </div>
+        <button
+          onClick={() => onChangeScrollOffset(clampedScroll + SCROLL_STEP)}
+          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
+          title="少し右へ"
+        >
+          +0.25
+        </button>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5 rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5">
+          <input
+            type="range"
+            min="0"
+            max={SCROLL_MAX}
+            step={SCROLL_STEP}
+            value={clampedScroll}
+            onChange={(event) => onChangeScrollOffset(Number(event.target.value))}
+            className="h-1 w-24 cursor-pointer appearance-none rounded bg-[#30363d] accent-emerald-500"
+          />
+        </div>
+
         <span className="hidden text-[10px] font-medium text-slate-400 sm:inline">鍵盤幅</span>
         <div className="flex items-center gap-1.5 rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5">
           <button
