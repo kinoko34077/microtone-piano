@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Menu} from 'lucide-react';
+import {Menu, VolumeX} from 'lucide-react';
 import {LayoutPreset, TuningPreset, AppSettings, OutOfRangeNotice} from './types/keyboard';
 import {
   ALL_STANDARD_LAYOUTS,
@@ -51,7 +51,8 @@ export default function App() {
     const initData = async () => {
       const layouts = await storageService.getAllLayoutPresets();
       const tunings = await storageService.getAllTuningPresets();
-      const loadedSettings = normalizeSettings(await storageService.getSettings());
+      const rawSettings = await storageService.getSettings();
+      const loadedSettings = normalizeSettings(rawSettings);
 
       setAllLayouts(layouts);
       setAllTunings(tunings);
@@ -63,8 +64,8 @@ export default function App() {
       globalAudioEngine.setSustain(loadedSettings.sustainLatch);
 
       if (
-        loadedSettings.upperOctaveOffset !== (await storageService.getSettings()).upperOctaveOffset ||
-        loadedSettings.lowerOctaveOffset !== (await storageService.getSettings()).lowerOctaveOffset
+        loadedSettings.upperOctaveOffset !== rawSettings.upperOctaveOffset ||
+        loadedSettings.lowerOctaveOffset !== rawSettings.lowerOctaveOffset
       ) {
         void storageService.saveSettings(loadedSettings);
       }
@@ -88,6 +89,11 @@ export default function App() {
     handleUpdateSettings({...settings, sustainLatch: next});
     globalAudioEngine.setSustainLatch(next);
   }, [handleUpdateSettings, settings]);
+
+  const handleAllNotesOff = useCallback(() => {
+    globalAudioEngine.allNotesOff();
+    setPcPressedMap(new Map());
+  }, []);
 
   const handleDuplicateLayout = useCallback(() => {
     const dup: LayoutPreset = {
@@ -129,16 +135,19 @@ export default function App() {
     void storageService.saveTuningPreset(currentTuning);
   }, [currentTuning, handleDuplicateTuning]);
 
-  const handleSelectLayout = useCallback((layout: LayoutPreset) => {
-    globalAudioEngine.allNotesOff();
-    setCurrentLayout(layout);
-    if (layout.defaultTuningId) {
-      const matched = allTunings.find((tuning) => tuning.id === layout.defaultTuningId);
-      if (matched) {
-        setCurrentTuning(matched);
+  const handleSelectLayout = useCallback(
+    (layout: LayoutPreset) => {
+      globalAudioEngine.allNotesOff();
+      setCurrentLayout(layout);
+      if (layout.defaultTuningId) {
+        const matched = allTunings.find((tuning) => tuning.id === layout.defaultTuningId);
+        if (matched) {
+          setCurrentTuning(matched);
+        }
       }
-    }
-  }, [allTunings]);
+    },
+    [allTunings],
+  );
 
   const handleSelectTuning = useCallback((tuning: TuningPreset) => {
     globalAudioEngine.allNotesOff();
@@ -297,6 +306,14 @@ export default function App() {
         title="サステイン固定"
       >
         Sus
+      </button>
+
+      <button
+        onClick={handleAllNotesOff}
+        className="app-allnotes-button fixed z-30 rounded-md border border-[#30363d] bg-[#161b22]/90 px-2 py-1 text-[11px] text-slate-300 shadow-xl transition-all backdrop-blur-sm hover:bg-[#21262d]"
+        title="全音停止"
+      >
+        <VolumeX size={12} />
       </button>
 
       <button

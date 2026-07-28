@@ -1,8 +1,9 @@
-import React, {useCallback, useRef, useState} from 'react';
-import {LayoutPreset, TuningPreset, AppSettings} from '../../types/keyboard';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
+import {LayoutPreset, TuningPreset, AppSettings, LaneConfig} from '../../types/keyboard';
 import {encodeAddress} from '../../core/address';
 import {calculateFrequency, getFormattedPitchLabel, resolvePitch} from '../../core/pitch';
 import {globalAudioEngine} from '../../core/audio';
+import {getDepthFromBoundaries, getLaneBoundaries, getSegmentHeightsFromBoundaries} from '../../core/laneBoundaries';
 
 interface InteractiveKeyboardProps {
   layout: LayoutPreset;
@@ -20,6 +21,12 @@ type PointerPressState = {
   voiceId?: string;
 };
 
+type SegmentRenderInfo = {
+  depth: number;
+  heightPercent: number;
+  isInvalid: boolean;
+};
+
 export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   layout,
   tuning,
@@ -34,15 +41,20 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const [pressedPointers, setPressedPointers] = useState<Map<string, PointerPressState>>(new Map());
   const [visibleColumns, setVisibleColumns] = useState(16);
 
-  const heldAddressSet = new Set<number>(externalPressedAddresses ?? []);
-  pressedPointers.forEach(({address}) => heldAddressSet.add(address));
+  const heldAddressSet = useMemo(() => {
+    const set = new Set<number>(externalPressedAddresses ?? []);
+    pressedPointers.forEach(({address}) => set.add(address));
+    return set;
+  }, [externalPressedAddresses, pressedPointers]);
 
-  const getLaneDepths = (x: number, isBlack: boolean) => {
-    const period = layout.horizontalCount || 16;
-    const laneIdx = (x % period) * 2 + (isBlack ? 1 : 0);
-    const lane = layout.lanes[laneIdx];
-    return lane ? lane.activeDepths : 0;
-  };
+  const getLane = useCallback(
+    (x: number, isBlack: boolean): LaneConfig | undefined => {
+      const period = layout.horizontalCount || 16;
+      const laneIdx = (x % period) * 2 + (isBlack ? 1 : 0);
+      return layout.lanes[laneIdx];
+    },
+    [layout],
+  );
 
   const getAddressFromCoordinates = useCallback(
     (clientX: number, clientY: number): number | null => {
@@ -61,7 +73,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
       if (relY <= blackHeight) {
         for (let x = 0; x < visibleCols; x += 1) {
-          const activeDepths = getLaneDepths(x, true);
+          const lane = getLane(x, true);
+          const activeDepths = lane?.activeDepths ?? 0;
           if (activeDepths === 0 && !settings.showInvalidSections) {
             continue;
           }
@@ -75,7 +88,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             return encodeAddress(
               x,
               true,
-              calculateDepthFromRatio(relY / blackHeight, activeDepths, settings.showInvalidSections),
+              calculateDepthFromRatio(
+                relY / blackHeight,
+                activeDepths,
+                lane ? getLaneBoundaries(layout, lane) : [0, 1],
+                settings.showInvalidSections,
+              ),
             );
           }
         }
@@ -83,17 +101,23 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
       const whiteXIndex = Math.floor(relX / keyWidth);
       if (whiteXIndex >= 0 && whiteXIndex < visibleCols) {
-        const activeDepths = getLaneDepths(whiteXIndex, false);
+        const lane = getLane(whiteXIndex, false);
+        const activeDepths = lane?.activeDepths ?? 0;
         return encodeAddress(
           whiteXIndex,
           false,
-          calculateDepthFromRatio(relY / totalHeight, activeDepths, settings.showInvalidSections),
+          calculateDepthFromRatio(
+            relY / totalHeight,
+            activeDepths,
+            lane ? getLaneBoundaries(layout, lane) : [0, 1],
+            settings.showInvalidSections,
+          ),
         );
       }
 
       return null;
     },
-    [layout, settings.blackKeyHeightRatio, settings.blackKeyWidthRatio, settings.keyWidth, settings.showInvalidSections],
+    [getLane, layout, settings.blackKeyHeightRatio, settings.blackKeyWidthRatio, settings.keyWidth, settings.showInvalidSections],
   );
 
   const triggerNoteOn = useCallback(
@@ -213,10 +237,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   }, [settings.keyWidth]);
 
   const renderWhiteKey = (x: number) => {
-    const activeDepths = getLaneDepths(x, false);
+    const lane = getLane(x, false);
+    const activeDepths = lane?.activeDepths ?? 0;
     const period = layout.horizontalCount || 16;
     const octOffset = Math.floor(x / period);
     const baseX = x % period;
+    const segments = getRenderedSegments(activeDepths, lane, layout, settings.showInvalidSections);
 
     return (
       <div
@@ -224,19 +250,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         className="relative flex h-full flex-col select-none rounded-b-md border-r border-slate-400/80 bg-white shadow-[inset_-1px_0_2px_rgba(0,0,0,0.1)]"
         style={{width: `${settings.keyWidth}px`, flexShrink: 0}}
       >
-        {Array.from({length: 8}, (_, idx) => {
-          const depth = 7 - idx;
-          const isInvalid = depth >= activeDepths;
+        {segments.map(({depth, heightPercent, isInvalid}) => {
           const address = encodeAddress(x, false, depth);
           const baseAddress = encodeAddress(baseX, false, depth);
           const pitchId = layout.mapping[baseAddress];
           const isPressed = heldAddressSet.has(address);
           const isSelected = selectedAddress === address;
-
-          if (isInvalid && !settings.showInvalidSections) {
-            return null;
-          }
-
           const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchId, tuning);
           const totalOctaveShift = octaveShift + tuningOctaveShift + octOffset;
           const formattedLabel = pitchDef
@@ -258,7 +277,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`white_${x}_depth_${depth}`}
-              className={`relative flex flex-1 flex-col justify-between border-b border-slate-200 p-1 transition-colors ${
+              className={`relative flex flex-col justify-between border-b border-slate-200 p-1 transition-colors ${
                 isPressed
                   ? 'bg-gradient-to-b from-amber-300 to-amber-400 text-amber-950 shadow-inner'
                   : isSelected
@@ -267,6 +286,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
                       ? 'border-slate-300 bg-slate-200/80 text-slate-400'
                       : 'text-slate-800 hover:bg-slate-100'
               }`}
+              style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
             >
               <div className="flex items-center justify-between text-[8px] font-mono opacity-50">
                 <span>d{depth}</span>
@@ -289,7 +309,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
   const renderBlackKeys = () =>
     Array.from({length: visibleColumns}, (_, x) => {
-      const activeDepths = getLaneDepths(x, true);
+      const lane = getLane(x, true);
+      const activeDepths = lane?.activeDepths ?? 0;
       if (activeDepths === 0 && !settings.showInvalidSections) {
         return null;
       }
@@ -300,6 +321,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       const blackWidth = settings.keyWidth * settings.blackKeyWidthRatio;
       const center = (x + 1) * settings.keyWidth;
       const blackLeft = center - blackWidth / 2;
+      const segments = getRenderedSegments(activeDepths, lane, layout, settings.showInvalidSections);
 
       return (
         <div
@@ -311,19 +333,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             height: `${settings.blackKeyHeightRatio * 100}%`,
           }}
         >
-          {Array.from({length: 8}, (_, idx) => {
-            const depth = 7 - idx;
-            const isInvalid = depth >= activeDepths;
+          {segments.map(({depth, heightPercent, isInvalid}) => {
             const address = encodeAddress(x, true, depth);
             const baseAddress = encodeAddress(baseX, true, depth);
             const pitchId = layout.mapping[baseAddress];
             const isPressed = heldAddressSet.has(address);
             const isSelected = selectedAddress === address;
-
-            if (isInvalid && !settings.showInvalidSections) {
-              return null;
-            }
-
             const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchId, tuning);
             const totalOctaveShift = octaveShift + tuningOctaveShift + octOffset;
             const formattedLabel = pitchDef
@@ -333,7 +348,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             return (
               <div
                 key={`black_${x}_depth_${depth}`}
-                className={`relative flex flex-1 flex-col justify-between border-b border-slate-800 p-0.5 transition-colors ${
+                className={`relative flex flex-col justify-between border-b border-slate-800 p-0.5 transition-colors ${
                   isPressed
                     ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-inner'
                     : isSelected
@@ -342,6 +357,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
                         ? 'border-slate-800 bg-slate-900/60 text-slate-700'
                         : 'bg-slate-900 text-slate-200 hover:bg-slate-800'
                 }`}
+                style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
               >
                 <div className="flex items-center justify-between text-[7px] font-mono opacity-40">
                   <span>d{depth}</span>
@@ -381,7 +397,41 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   );
 };
 
-function calculateDepthFromRatio(topRatio: number, activeDepths: number, showInvalidSections: boolean): number {
+function getRenderedSegments(
+  activeDepths: number,
+  lane: LaneConfig | undefined,
+  layout: LayoutPreset,
+  showInvalidSections: boolean,
+): SegmentRenderInfo[] {
+  if (showInvalidSections) {
+    return Array.from({length: 8}, (_, index) => {
+      const depth = 7 - index;
+      return {
+        depth,
+        heightPercent: 12.5,
+        isInvalid: depth >= activeDepths,
+      };
+    });
+  }
+
+  if (activeDepths <= 0) {
+    return [];
+  }
+
+  const heights = getSegmentHeightsFromBoundaries(getLaneBoundaries(layout, lane));
+  return Array.from({length: activeDepths}, (_, index) => ({
+    depth: activeDepths - 1 - index,
+    heightPercent: heights[index] * 100,
+    isInvalid: false,
+  }));
+}
+
+function calculateDepthFromRatio(
+  topRatio: number,
+  activeDepths: number,
+  boundaries: number[],
+  showInvalidSections: boolean,
+): number {
   if (activeDepths <= 0) {
     return 0;
   }
@@ -393,6 +443,5 @@ function calculateDepthFromRatio(topRatio: number, activeDepths: number, showInv
     return Math.max(0, Math.min(7, 7 - idxFromTop));
   }
 
-  const idxFromTop = Math.floor(clampedTopRatio * activeDepths);
-  return Math.max(0, Math.min(activeDepths - 1, activeDepths - 1 - idxFromTop));
+  return getDepthFromBoundaries(clampedTopRatio, activeDepths, boundaries);
 }

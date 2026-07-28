@@ -17,6 +17,7 @@ import { applyAutoMapping } from '../../core/mapping';
 import { globalAudioEngine } from '../../core/audio';
 import { Plus, Minus, Trash2, Zap, Copy, Check, Music2, Sliders, Layers, Edit3, Type } from 'lucide-react';
 import { BlurCommitNumberInput } from '../BlurCommitNumberInput';
+import { LaneBoundaryEditor } from './LaneBoundaryEditor';
 
 interface PresetEditorProps {
   layout: LayoutPreset;
@@ -41,6 +42,7 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
 }) => {
   const [selectedAddresses, setSelectedAddresses] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<'grid' | 'tuning' | 'lanes'>('grid');
+  const [laneEditTab, setLaneEditTab] = useState<'count' | 'height'>('count');
   const [assignOctaveShift, setAssignOctaveShift] = useState<number>(0);
   const [showAllDepthSlots, setShowAllDepthSlots] = useState<boolean>(false);
 
@@ -813,6 +815,31 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
               </div>
             </div>
 
+            <div className="flex gap-2">
+              <button
+                onClick={() => setLaneEditTab('count')}
+                className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors ${
+                  laneEditTab === 'count'
+                    ? 'bg-sky-600 text-white border-sky-500'
+                    : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-slate-800'
+                }`}
+              >
+                段数
+              </button>
+              <button
+                onClick={() => setLaneEditTab('height')}
+                className={`px-3 py-1.5 rounded-md text-xs font-bold border transition-colors ${
+                  laneEditTab === 'height'
+                    ? 'bg-sky-600 text-white border-sky-500'
+                    : 'bg-[#0d1117] text-slate-300 border-[#30363d] hover:bg-slate-800'
+                }`}
+              >
+                段高
+              </button>
+            </div>
+
+            {laneEditTab === 'count' && (
+            <>
             <div className="flex flex-wrap items-center gap-2 bg-[#0d1117] p-3 rounded-lg border border-[#30363d]">
               <span className="text-xs font-bold text-slate-300 mr-1">全レーン段数一括適用:</span>
               {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
@@ -936,6 +963,16 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
                 );
               })}
             </div>
+            </>
+            )}
+
+            {laneEditTab === 'height' && (
+              <LaneBoundaryEditor
+                layout={layout}
+                displayHorizontalCount={displayHorizontalCount}
+                onUpdateLayout={onUpdateLayout}
+              />
+            )}
           </div>
         )}
       </div>

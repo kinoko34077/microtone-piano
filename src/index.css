@@ -48,6 +48,11 @@ body {
   right: calc(env(safe-area-inset-right) + 3.85rem);
 }
 
+.app-allnotes-button {
+  top: calc(env(safe-area-inset-top) + 0.65rem);
+  right: calc(env(safe-area-inset-right) + 6.85rem);
+}
+
 @layer utilities {
   .grid-cols-16 {
     grid-template-columns: repeat(16, minmax(0, 1fr));
