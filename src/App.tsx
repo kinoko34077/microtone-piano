@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Menu, VolumeX} from 'lucide-react';
 import {LayoutPreset, TuningPreset, AppSettings, OutOfRangeNotice} from './types/keyboard';
 import {
@@ -58,6 +58,8 @@ export default function App() {
   const [selectedAddress, setSelectedAddress] = useState<number | null>(null);
   const [notices, setNotices] = useState<OutOfRangeNotice[]>([]);
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
+  const [settingsReady, setSettingsReady] = useState(false);
+  const saveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const initData = async () => {
@@ -75,6 +77,7 @@ export default function App() {
       globalAudioEngine.setNoteDecayMs(loadedSettings.noteDecayMs ?? 0);
       globalAudioEngine.setSustain(loadedSettings.sustainLatch);
       setPianoSampleOverrides(loadedSettings.pianoSampleOverrides);
+      setSettingsReady(true);
 
       if (JSON.stringify(loadedSettings) !== JSON.stringify(rawSettings)) {
         void storageService.saveSettings(loadedSettings);
@@ -88,11 +91,31 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!settingsReady) {
+      return;
+    }
+
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      void storageService.saveSettings(settings);
+      saveTimerRef.current = null;
+    }, 180);
+
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, [settings, settingsReady]);
+
   const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
     const normalized = normalizeSettings(newSettings);
     setSettings(normalized);
     setPianoSampleOverrides(normalized.pianoSampleOverrides);
-    void storageService.saveSettings(normalized);
   }, []);
 
   const handleToggleSustainLatch = useCallback(() => {
@@ -107,16 +130,28 @@ export default function App() {
   }, []);
 
   const handleDuplicateLayout = useCallback(() => {
-    const dup: LayoutPreset = {
+    const duplicate: LayoutPreset = {
       ...currentLayout,
       id: `layout_custom_${Date.now()}`,
       name: `${currentLayout.name} コピー`,
       isStandard: false,
     };
-    setAllLayouts((prev) => [...prev, dup]);
-    setCurrentLayout(dup);
-    void storageService.saveLayoutPreset(dup);
+    setAllLayouts((prev) => [...prev, duplicate]);
+    setCurrentLayout(duplicate);
+    void storageService.saveLayoutPreset(duplicate);
   }, [currentLayout]);
+
+  const handleDuplicateTuning = useCallback(() => {
+    const duplicate: TuningPreset = {
+      ...currentTuning,
+      id: `tuning_custom_${Date.now()}`,
+      name: `${currentTuning.name} コピー`,
+      isStandard: false,
+    };
+    setAllTunings((prev) => [...prev, duplicate]);
+    setCurrentTuning(duplicate);
+    void storageService.saveTuningPreset(duplicate);
+  }, [currentTuning]);
 
   const handleSaveLayout = useCallback(() => {
     if (currentLayout.isStandard) {
@@ -125,18 +160,6 @@ export default function App() {
     }
     void storageService.saveLayoutPreset(currentLayout);
   }, [currentLayout, handleDuplicateLayout]);
-
-  const handleDuplicateTuning = useCallback(() => {
-    const dup: TuningPreset = {
-      ...currentTuning,
-      id: `tuning_custom_${Date.now()}`,
-      name: `${currentTuning.name} コピー`,
-      isStandard: false,
-    };
-    setAllTunings((prev) => [...prev, dup]);
-    setCurrentTuning(dup);
-    void storageService.saveTuningPreset(dup);
-  }, [currentTuning]);
 
   const handleSaveTuning = useCallback(() => {
     if (currentTuning.isStandard) {
@@ -167,15 +190,15 @@ export default function App() {
 
   const handleUpdateLayout = useCallback((newLayout: LayoutPreset) => {
     if (newLayout.isStandard) {
-      const dup: LayoutPreset = storageService.deepClone({
+      const duplicate: LayoutPreset = storageService.deepClone({
         ...newLayout,
         id: `layout_custom_${Date.now()}`,
         name: `${newLayout.name} カスタム`,
         isStandard: false,
       });
-      setAllLayouts((prev) => [...prev, dup]);
-      setCurrentLayout(dup);
-      void storageService.saveLayoutPreset(dup);
+      setAllLayouts((prev) => [...prev, duplicate]);
+      setCurrentLayout(duplicate);
+      void storageService.saveLayoutPreset(duplicate);
       return;
     }
 
@@ -186,15 +209,15 @@ export default function App() {
 
   const handleUpdateTuning = useCallback((newTuning: TuningPreset) => {
     if (newTuning.isStandard) {
-      const dup: TuningPreset = storageService.deepClone({
+      const duplicate: TuningPreset = storageService.deepClone({
         ...newTuning,
         id: `tuning_custom_${Date.now()}`,
         name: `${newTuning.name} カスタム`,
         isStandard: false,
       });
-      setAllTunings((prev) => [...prev, dup]);
-      setCurrentTuning(dup);
-      void storageService.saveTuningPreset(dup);
+      setAllTunings((prev) => [...prev, duplicate]);
+      setCurrentTuning(duplicate);
+      void storageService.saveTuningPreset(duplicate);
       return;
     }
 
@@ -236,18 +259,18 @@ export default function App() {
       }
 
       event.preventDefault();
-      const pitchId = currentLayout.mapping[address];
-      if (pitchId === undefined || pitchId === -1) {
+      const pitchRef = currentLayout.mapping[address];
+      if (pitchRef === undefined || pitchRef === -1) {
         return;
       }
 
-      const {pitchDef, octaveShift} = resolvePitch(pitchId, currentTuning);
+      const {pitchDef, octaveShift} = resolvePitch(pitchRef, currentTuning);
       if (!pitchDef) {
         return;
       }
 
       const frequency = calculateFrequency(pitchDef, currentTuning, octaveShift);
-      const voiceId = await globalAudioEngine.noteOn(address, pitchId, frequency, 1.0, `pc_${event.key}`);
+      const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, 1.0, `pc_${event.key}`);
       setPcPressedMap((prev) => new Map(prev).set(event.key, {voiceId, address}));
       setSelectedAddress(address);
     };

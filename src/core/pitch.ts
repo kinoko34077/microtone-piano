@@ -1,43 +1,58 @@
-/**
- * 音高計算・周波数算出モジュール
- */
+import {PitchDefinition, PitchLabelMode, TuningPreset} from '../types/keyboard';
 
-import { PitchDefinition, PitchLabelMode, TuningPreset } from '../types/keyboard';
+export const PITCH_REFERENCE_STRIDE = 256;
 
-// 12EDO音名マッピング (標準C4=baseStep 0 = C4)
 const NOTE_NAMES_12 = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const DOREMI_NAMES_12 = ['ド', 'ド#', 'レ', 'レ#', 'ミ', 'ファ', 'ファ#', 'ソ', 'ソ#', 'ラ', 'ラ#', 'シ'];
 
-/**
- * 音高定義および調律プリセットから周波数 (Hz) を算出
- */
+export function encodePitchReference(basePitchId: number, octaveShift: number = 0): number {
+  return Math.trunc(basePitchId) + Math.trunc(octaveShift) * PITCH_REFERENCE_STRIDE;
+}
+
+export function decodePitchReference(pitchRef: number): {basePitchId: number; octaveShift: number} {
+  const octaveShift = Math.floor(pitchRef / PITCH_REFERENCE_STRIDE);
+  const basePitchId = ((pitchRef % PITCH_REFERENCE_STRIDE) + PITCH_REFERENCE_STRIDE) % PITCH_REFERENCE_STRIDE;
+  return {basePitchId, octaveShift};
+}
+
 export function resolvePitch(
-  pitchId: number | undefined,
-  preset: TuningPreset
-): { pitchDef: PitchDefinition | null; octaveShift: number } {
-  if (pitchId === undefined || pitchId === -1) {
-    return { pitchDef: null, octaveShift: 0 };
+  pitchRef: number | undefined,
+  preset: TuningPreset,
+): {pitchDef: PitchDefinition | null; octaveShift: number} {
+  if (pitchRef === undefined || pitchRef === -1) {
+    return {pitchDef: null, octaveShift: 0};
   }
-  const N = preset.pitches.length;
-  if (N === 0) {
-    return { pitchDef: null, octaveShift: 0 };
+
+  const exactMatch = preset.pitches.find((pitch) => pitch.id === pitchRef);
+  if (exactMatch) {
+    return {pitchDef: exactMatch, octaveShift: 0};
   }
-  
-  const pitchIndex = ((pitchId % N) + N) % N;
-  const baseOctaveShift = Math.floor(pitchId / N);
-  const pitchDef = preset.pitches[pitchIndex];
-  
-  return { pitchDef, octaveShift: baseOctaveShift };
+
+  const {basePitchId, octaveShift} = decodePitchReference(pitchRef);
+  const baseMatch = preset.pitches.find((pitch) => pitch.id === basePitchId);
+  if (baseMatch) {
+    return {pitchDef: baseMatch, octaveShift};
+  }
+
+  const pitchCount = preset.pitches.length;
+  if (pitchCount === 0) {
+    return {pitchDef: null, octaveShift: 0};
+  }
+
+  const legacyIndex = ((pitchRef % pitchCount) + pitchCount) % pitchCount;
+  return {
+    pitchDef: preset.pitches[legacyIndex] ?? null,
+    octaveShift: Math.floor(pitchRef / pitchCount),
+  };
 }
 
 export function calculateFrequency(
   pitch: PitchDefinition,
   preset: TuningPreset,
-  octaveShift: number = 0
+  octaveShift: number = 0,
 ): number {
-  const baseFreq = preset.baseFrequency || 261.63; // C4 default
+  const baseFreq = preset.baseFrequency || 261.63;
   const periodCents = preset.periodCents || 1200.0;
-  // 周期の周波数倍率 (1200 cent -> 2.0)
   const periodRatio = Math.pow(2, periodCents / 1200.0);
 
   let freq = baseFreq;
@@ -47,34 +62,23 @@ export function calculateFrequency(
       const edo = pitch.edo || 12;
       const step = pitch.step ?? 0;
       const baseStep = preset.baseStep ?? 0;
-      const stepDiff = step - baseStep;
-      freq = baseFreq * Math.pow(periodRatio, stepDiff / edo);
+      freq = baseFreq * Math.pow(periodRatio, (step - baseStep) / edo);
       break;
     }
-
-    case 'cents': {
-      const cents = pitch.cents ?? 0;
-      freq = baseFreq * Math.pow(2, cents / 1200.0);
+    case 'cents':
+      freq = baseFreq * Math.pow(2, (pitch.cents ?? 0) / 1200.0);
       break;
-    }
-
-    case 'ratio': {
-      const num = pitch.numerator || 1;
-      const den = pitch.denominator || 1;
-      freq = baseFreq * (num / den);
+    case 'ratio':
+      freq = baseFreq * ((pitch.numerator || 1) / (pitch.denominator || 1));
       break;
-    }
-
-    case 'frequency': {
+    case 'frequency':
       freq = pitch.frequency || baseFreq;
       break;
-    }
-
     default:
       freq = baseFreq;
+      break;
   }
 
-  // オクターブ/周期シフト適用
   if (octaveShift !== 0) {
     freq *= Math.pow(periodRatio, octaveShift);
   }
@@ -82,16 +86,10 @@ export function calculateFrequency(
   return freq;
 }
 
-/**
- * 周波数が可聴推奨域(20Hz ~ 20000Hz)の外にあるか判定
- */
 export function isFrequencyOutOfRecommendedRange(freq: number): boolean {
   return freq < 20.0 || freq > 20000.0;
 }
 
-/**
- * 周波数表示用文字列の整形
- */
 export function formatFrequency(freq: number): string {
   if (freq >= 1000) {
     return `${(freq / 1000).toFixed(3)} kHz`;
@@ -99,40 +97,35 @@ export function formatFrequency(freq: number): string {
   return `${freq.toFixed(2)} Hz`;
 }
 
-/**
- * 音高の文字表現を取得 (例: "31EDO Step +5", "700.0 cent", "3/2 (1.5)", "440.0 Hz")
- */
 export function getPitchLabel(pitch: PitchDefinition): string {
   switch (pitch.type) {
     case 'edo':
-      return `${pitch.edo || 12}EDO ステップ ${pitch.step ?? 0}`;
+      return `${pitch.edo || 12}EDO Step ${pitch.step ?? 0}`;
     case 'cents':
       return `${pitch.cents ?? 0} cent`;
     case 'ratio': {
-      const r = (pitch.numerator || 1) / (pitch.denominator || 1);
-      return `${pitch.numerator || 1}/${pitch.denominator || 1} (${r.toFixed(3)})`;
+      const ratio = (pitch.numerator || 1) / (pitch.denominator || 1);
+      return `${pitch.numerator || 1}/${pitch.denominator || 1} (${ratio.toFixed(3)})`;
     }
     case 'frequency':
       return `${pitch.frequency ?? 440} Hz`;
     default:
-      return pitch.name || '不明';
+      return pitch.name || '音高';
   }
 }
 
-/**
- * モード (音名 C4 / ドレミ / ステップ / 周波数 / なし) に合わせたラベルを取得
- */
 export function getFormattedPitchLabel(
   pitch: PitchDefinition,
   preset: TuningPreset,
   mode: PitchLabelMode = 'note',
-  octaveShift: number = 0
+  octaveShift: number = 0,
 ): string {
-  if (mode === 'none') return '';
+  if (mode === 'none') {
+    return '';
+  }
 
   if (mode === 'freq') {
-    const freq = calculateFrequency(pitch, preset, octaveShift);
-    return formatFrequency(freq);
+    return formatFrequency(calculateFrequency(pitch, preset, octaveShift));
   }
 
   const pitchCount = preset.pitches?.length || 12;
@@ -144,34 +137,30 @@ export function getFormattedPitchLabel(
     return `S${shiftedStep}`;
   }
 
-  const N = pitchCount > 0 ? pitchCount : 12;
-  const oct = 4 + Math.floor(shiftedStep / N);
-  const mod = ((shiftedStep % N) + N) % N;
+  const cycleLength = pitchCount > 0 ? pitchCount : 12;
+  const octave = 4 + Math.floor(shiftedStep / cycleLength);
+  const mod = ((shiftedStep % cycleLength) + cycleLength) % cycleLength;
 
   if (mode === 'note') {
     if (preset.noteNames && preset.noteNames.length > 0) {
-      const noteName = preset.noteNames[mod % preset.noteNames.length];
-      return `${noteName}${oct}`;
+      return `${preset.noteNames[mod % preset.noteNames.length]}${octave}`;
     }
     if (edo === 12) {
-      return `${NOTE_NAMES_12[mod % 12]}${oct}`;
+      return `${NOTE_NAMES_12[mod % 12]}${octave}`;
     }
   }
 
   if (mode === 'doremi') {
     if (preset.doremiNames && preset.doremiNames.length > 0) {
-      const doremiName = preset.doremiNames[mod % preset.doremiNames.length];
-      return `${doremiName}${oct}`;
+      return `${preset.doremiNames[mod % preset.doremiNames.length]}${octave}`;
     }
     if (edo === 12) {
-      return `${DOREMI_NAMES_12[mod % 12]}${oct}`;
+      return `${DOREMI_NAMES_12[mod % 12]}${octave}`;
     }
   }
 
-  // その他カスタム名がある場合
   if (pitch.name) {
-    if (octaveShift === 0) return pitch.name;
-    return `${pitch.name} (${octaveShift > 0 ? '+' : ''}${octaveShift}oct)`;
+    return octaveShift === 0 ? pitch.name : `${pitch.name} (${octaveShift > 0 ? '+' : ''}${octaveShift}oct)`;
   }
 
   return `S${shiftedStep}`;
