@@ -61,15 +61,17 @@ export default function App() {
   const [notices, setNotices] = useState<OutOfRangeNotice[]>([]);
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
   const [settingsReady, setSettingsReady] = useState(false);
+  const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
+  const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
   const saveTimerRef = useRef<number | null>(null);
 
   const upperColumnRange = useMemo(
-    () => getKeyboardColumnRange(currentLayout, currentTuning, settings.upperOctaveOffset ?? 1),
-    [currentLayout, currentTuning, settings.upperOctaveOffset],
+    () => getKeyboardColumnRange(currentLayout, currentTuning, 0),
+    [currentLayout, currentTuning],
   );
   const lowerColumnRange = useMemo(
-    () => getKeyboardColumnRange(currentLayout, currentTuning, settings.lowerOctaveOffset ?? 0),
-    [currentLayout, currentTuning, settings.lowerOctaveOffset],
+    () => getKeyboardColumnRange(currentLayout, currentTuning, 0),
+    [currentLayout, currentTuning],
   );
 
   useEffect(() => {
@@ -127,8 +129,8 @@ export default function App() {
   }, [settings, settingsReady]);
 
   useEffect(() => {
-    const nextUpper = Math.min(settings.upperScrollOffset ?? 0, upperColumnRange.maxScrollOffset);
-    const nextLower = Math.min(settings.lowerScrollOffset ?? 0, lowerColumnRange.maxScrollOffset);
+    const nextUpper = Math.min(settings.upperScrollOffset ?? 0, upperMaxScrollOffset);
+    const nextLower = Math.min(settings.lowerScrollOffset ?? 0, lowerMaxScrollOffset);
     if (nextUpper === (settings.upperScrollOffset ?? 0) && nextLower === (settings.lowerScrollOffset ?? 0)) {
       return;
     }
@@ -140,7 +142,7 @@ export default function App() {
         lowerScrollOffset: nextLower,
       }),
     );
-  }, [lowerColumnRange.maxScrollOffset, settings.lowerScrollOffset, settings.upperScrollOffset, upperColumnRange.maxScrollOffset]);
+  }, [lowerMaxScrollOffset, settings.lowerScrollOffset, settings.upperScrollOffset, upperMaxScrollOffset]);
 
   const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
     setSettings(normalizeSettings(newSettings));
@@ -360,8 +362,8 @@ export default function App() {
     return next;
   }, [pcPressedMap]);
 
-  const upperScrollOffset = Math.min(settings.upperScrollOffset ?? 0, upperColumnRange.maxScrollOffset);
-  const lowerScrollOffset = Math.min(settings.lowerScrollOffset ?? 0, lowerColumnRange.maxScrollOffset);
+  const upperScrollOffset = Math.min(settings.upperScrollOffset ?? 0, upperMaxScrollOffset);
+  const lowerScrollOffset = Math.min(settings.lowerScrollOffset ?? 0, lowerMaxScrollOffset);
 
   const headerActions = (
     <HeaderActions
@@ -403,11 +405,10 @@ export default function App() {
               <div className="flex min-h-0 flex-1 flex-col border-b border-[#30363d]">
                 <OctaveBar
                   label="上段"
-                  octaveOffset={settings.upperOctaveOffset ?? 1}
-                  onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, upperOctaveOffset: offset})}
                   scrollOffset={upperScrollOffset}
                   onChangeScrollOffset={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
-                  maxScrollOffset={upperColumnRange.maxScrollOffset}
+                  maxScrollOffset={upperMaxScrollOffset}
+                  octaveSpan={upperColumnRange.period}
                   keyWidth={settings.upperKeyWidth ?? settings.keyWidth}
                   onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width, upperKeyWidth: width})}
                   actions={headerActions}
@@ -417,9 +418,9 @@ export default function App() {
                     layout={currentLayout}
                     tuning={currentTuning}
                     settings={{...settings, keyWidth: settings.upperKeyWidth ?? settings.keyWidth}}
-                    octaveShift={settings.upperOctaveOffset ?? 1}
                     scrollOffsetColumns={upperScrollOffset}
                     onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
+                    onMaxScrollOffsetChange={setUpperMaxScrollOffset}
                     externalPressedAddresses={pressedAddressSet}
                   />
                 </div>
@@ -429,11 +430,10 @@ export default function App() {
             <div className="flex min-h-0 flex-1 flex-col">
               <OctaveBar
                 label={settings.showTwoRows ? '下段' : undefined}
-                octaveOffset={settings.lowerOctaveOffset ?? 0}
-                onChangeOctaveOffset={(offset) => handleUpdateSettings({...settings, lowerOctaveOffset: offset})}
                 scrollOffset={lowerScrollOffset}
                 onChangeScrollOffset={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
-                maxScrollOffset={lowerColumnRange.maxScrollOffset}
+                maxScrollOffset={lowerMaxScrollOffset}
+                octaveSpan={lowerColumnRange.period}
                 keyWidth={settings.lowerKeyWidth ?? settings.keyWidth}
                 onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width, lowerKeyWidth: width})}
                 actions={!settings.showTwoRows ? headerActions : undefined}
@@ -443,9 +443,9 @@ export default function App() {
                   layout={currentLayout}
                   tuning={currentTuning}
                   settings={{...settings, keyWidth: settings.lowerKeyWidth ?? settings.keyWidth}}
-                  octaveShift={settings.lowerOctaveOffset ?? 0}
                   scrollOffsetColumns={lowerScrollOffset}
                   onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
+                  onMaxScrollOffsetChange={setLowerMaxScrollOffset}
                   externalPressedAddresses={pressedAddressSet}
                 />
               </div>
@@ -454,16 +454,33 @@ export default function App() {
         )}
 
         {activeMode === 'editor' && (
-          <PresetEditor
-            layout={currentLayout}
-            tuning={currentTuning}
-            settings={settings}
-            onUpdateLayout={handleUpdateLayout}
-            onUpdateTuning={handleUpdateTuning}
-            onUpdateSettings={handleUpdateSettings}
-            selectedAddress={editorSelectedAddress}
-            onSelectAddress={setEditorSelectedAddress}
-          />
+          <div className="flex h-full flex-col gap-3">
+            <div className="flex items-center justify-between rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2">
+              <button
+                onClick={() => setActiveMode('keyboard')}
+                className="rounded border border-[#30363d] bg-[#0d1117] px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:bg-[#21262d]"
+              >
+                鍵盤へ戻る
+              </button>
+              <button
+                onClick={() => setIsSidebarOpen(true)}
+                className="rounded border border-[#30363d] bg-[#0d1117] p-1.5 text-slate-200 transition-colors hover:bg-[#21262d]"
+                title="メニュー"
+              >
+                <Menu size={14} />
+              </button>
+            </div>
+            <PresetEditor
+              layout={currentLayout}
+              tuning={currentTuning}
+              settings={settings}
+              onUpdateLayout={handleUpdateLayout}
+              onUpdateTuning={handleUpdateTuning}
+              onUpdateSettings={handleUpdateSettings}
+              selectedAddress={editorSelectedAddress}
+              onSelectAddress={setEditorSelectedAddress}
+            />
+          </div>
         )}
       </main>
     </div>

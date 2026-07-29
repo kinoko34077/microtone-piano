@@ -10,9 +10,9 @@ interface InteractiveKeyboardProps {
   layout: LayoutPreset;
   tuning: TuningPreset;
   settings: AppSettings;
-  octaveShift?: number;
   scrollOffsetColumns?: number;
   onChangeScrollOffsetColumns?: (offset: number) => void;
+  onMaxScrollOffsetChange?: (offset: number) => void;
   externalPressedAddresses?: Set<number>;
 }
 
@@ -34,9 +34,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   layout,
   tuning,
   settings,
-  octaveShift = 0,
   scrollOffsetColumns = 0,
   onChangeScrollOffsetColumns,
+  onMaxScrollOffsetChange,
   externalPressedAddresses,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -44,8 +44,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const scrollRafRef = useRef<number | null>(null);
   const [pressedPointers, setPressedPointers] = useState<Map<string, PointerPressState>>(new Map());
   const [viewportWidth, setViewportWidth] = useState(0);
-  const columnRange = useMemo(() => getKeyboardColumnRange(layout, tuning, octaveShift), [layout, tuning, octaveShift]);
+  const columnRange = useMemo(() => getKeyboardColumnRange(layout, tuning, 0), [layout, tuning]);
   const {period, startRepeat, totalColumns} = columnRange;
+  const maxScrollableColumns = useMemo(() => {
+    const contentWidth = settings.keyWidth * totalColumns + settings.keyWidth * settings.blackKeyWidthRatio;
+    return Math.max(0, (contentWidth - viewportWidth) / settings.keyWidth);
+  }, [settings.blackKeyWidthRatio, settings.keyWidth, totalColumns, viewportWidth]);
 
   const heldAddressSet = useMemo(() => {
     const set = new Set<number>(externalPressedAddresses ?? []);
@@ -160,7 +164,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       const token = ++pressTokenRef.current;
       setPressedPointers((prev) => new Map(prev).set(pointerKey, {address, token}));
 
-      const frequency = calculateFrequency(pitchDef, tuning, octaveShift + tuningOctaveShift + octOffset);
+      const frequency = calculateFrequency(pitchDef, tuning, tuningOctaveShift + octOffset);
       const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, velocity, pointerKey);
 
       setPressedPointers((prev) => {
@@ -174,7 +178,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         return next;
       });
     },
-    [layout, octaveShift, period, startRepeat, tuning],
+    [layout, period, startRepeat, tuning],
   );
 
   const triggerNoteOff = useCallback((pointerKey: string) => {
@@ -241,8 +245,16 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     if (!containerRef.current) {
       return;
     }
-    containerRef.current.scrollLeft = Math.max(0, scrollOffsetColumns) * settings.keyWidth;
-  }, [scrollOffsetColumns, settings.keyWidth]);
+    const clamped = Math.max(0, Math.min(maxScrollableColumns, scrollOffsetColumns));
+    containerRef.current.scrollLeft = clamped * settings.keyWidth;
+    if (clamped !== scrollOffsetColumns && onChangeScrollOffsetColumns) {
+      onChangeScrollOffsetColumns(clamped);
+    }
+  }, [maxScrollableColumns, onChangeScrollOffsetColumns, scrollOffsetColumns, settings.keyWidth]);
+
+  useEffect(() => {
+    onMaxScrollOffsetChange?.(maxScrollableColumns);
+  }, [maxScrollableColumns, onMaxScrollOffsetChange]);
 
   const handleScroll = useCallback(() => {
     if (!containerRef.current || !onChangeScrollOffsetColumns) {
@@ -279,7 +291,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           const pitchRef = layout.mapping[baseAddress];
           const isPressed = heldAddressSet.has(address);
           const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchRef, tuning);
-          const totalOctaveShift = octaveShift + tuningOctaveShift + octOffset;
+          const totalOctaveShift = tuningOctaveShift + octOffset;
           const formattedLabel = pitchDef
             ? getFormattedPitchLabel(pitchDef, tuning, settings.pitchLabelMode, totalOctaveShift)
             : '';
@@ -348,7 +360,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           const pitchRef = layout.mapping[baseAddress];
           const isPressed = heldAddressSet.has(address);
           const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchRef, tuning);
-          const totalOctaveShift = octaveShift + tuningOctaveShift + logicalOctaveOffset;
+          const totalOctaveShift = tuningOctaveShift + logicalOctaveOffset;
           const formattedLabel = pitchDef
             ? getFormattedPitchLabel(pitchDef, tuning, settings.pitchLabelMode, totalOctaveShift)
             : '';

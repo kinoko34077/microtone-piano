@@ -356,13 +356,13 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
                         <div>
                           <div className="mb-1 text-[11px] font-semibold text-slate-300">白鍵</div>
                           <div className="grid gap-1">
-                            {Array.from({length: whiteDepths}, (_, idx) => renderAddressButton(encodeAddress(x, false, showAllDepthSlots ? idx : whiteDepths - 1 - idx)))}
+                            {Array.from({length: blackDepths}, (_, idx) => renderAddressButton(encodeAddress(x, true, showAllDepthSlots ? idx : blackDepths - 1 - idx)))}
                           </div>
                         </div>
                         <div>
                           <div className="mb-1 text-[11px] font-semibold text-amber-300">黒鍵</div>
                           <div className="grid gap-1">
-                            {Array.from({length: blackDepths}, (_, idx) => renderAddressButton(encodeAddress(x, true, showAllDepthSlots ? idx : blackDepths - 1 - idx)))}
+                            {Array.from({length: whiteDepths}, (_, idx) => renderAddressButton(encodeAddress(x, false, showAllDepthSlots ? idx : whiteDepths - 1 - idx)))}
                           </div>
                         </div>
                       </div>

@@ -2,8 +2,8 @@ import {encodeAddress} from './address';
 import {calculateFrequency, resolvePitch} from './pitch';
 import {LayoutPreset, TuningPreset} from '../types/keyboard';
 
-const MIN_AUDIBLE_FREQUENCY = 20;
-const MAX_AUDIBLE_FREQUENCY = 20000;
+const MIN_DISPLAY_FREQUENCY = 27.5;
+const MAX_DISPLAY_FREQUENCY = 4186.01;
 const MAX_REPEAT_ABS = 64;
 
 export interface KeyboardColumnRange {
@@ -25,10 +25,10 @@ function getRepeatBounds(baseFrequency: number, periodRatio: number): {minRepeat
 
   const logRatio = Math.log(periodRatio);
   const minRepeat = clampRepeat(
-    Math.ceil((Math.log(MIN_AUDIBLE_FREQUENCY / baseFrequency) / logRatio) - 1e-9),
+    Math.ceil((Math.log(MIN_DISPLAY_FREQUENCY / baseFrequency) / logRatio) - 1e-9),
   );
   const maxRepeat = clampRepeat(
-    Math.floor((Math.log(MAX_AUDIBLE_FREQUENCY / baseFrequency) / logRatio) + 1e-9),
+    Math.floor((Math.log(MAX_DISPLAY_FREQUENCY / baseFrequency) / logRatio) + 1e-9),
   );
 
   if (minRepeat > maxRepeat) {

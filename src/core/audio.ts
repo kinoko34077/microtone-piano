@@ -310,7 +310,7 @@ export class AudioEngine {
         const buffer = await this.loadPianoSampleBuffer(sample);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        const playbackRate = frequency / sample.baseFrequency;
+        const playbackRate = frequency / (sample.referenceFrequency || sample.baseFrequency);
         source.playbackRate.setValueAtTime(playbackRate, now);
         source.connect(gainNode);
         source.start(now);

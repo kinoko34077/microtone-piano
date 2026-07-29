@@ -8,6 +8,7 @@ export interface PianoSampleDefinition {
   fileName: string;
   url: string;
   baseFrequency: number;
+  referenceFrequency: number;
   noteLabel: string;
   pitchId?: number;
   octaveShift?: number;
@@ -97,6 +98,7 @@ const SAMPLE_CATALOG: PianoSampleDefinition[] = Object.entries(sampleUrls)
       fileName,
       url,
       baseFrequency: analyzed.baseFrequency,
+      referenceFrequency: analyzed.baseFrequency,
       noteLabel: analyzed.noteLabel,
     };
   })
@@ -164,7 +166,7 @@ function resolveSampleDefinition(
         ...sample,
         pitchId: override.pitchId,
         octaveShift: override.octaveShift ?? 0,
-        baseFrequency: resolved.baseFrequency,
+        referenceFrequency: resolved.baseFrequency,
         noteLabel: resolved.noteLabel,
       };
     }
@@ -176,14 +178,14 @@ function resolveSampleDefinition(
       ...sample,
       pitchId: guessed.pitchId,
       octaveShift: guessed.octaveShift,
-      baseFrequency: guessed.baseFrequency,
+      referenceFrequency: guessed.baseFrequency,
       noteLabel: guessed.noteLabel,
     };
   }
 
   return {
     ...sample,
-    baseFrequency: override?.baseFrequency ?? sample.baseFrequency,
+    referenceFrequency: override?.baseFrequency ?? sample.baseFrequency,
     noteLabel: override?.noteLabel ?? sample.noteLabel,
   };
 }
@@ -191,7 +193,7 @@ function resolveSampleDefinition(
 export function buildPianoSamples(tuning: TuningPreset, overrides?: PianoSampleOverrideMap): PianoSampleDefinition[] {
   return SAMPLE_CATALOG
     .map((sample) => resolveSampleDefinition(sample, tuning, overrides))
-    .sort((a, b) => a.baseFrequency - b.baseFrequency);
+    .sort((a, b) => a.referenceFrequency - b.referenceFrequency);
 }
 
 export function setPianoSampleOverrides(tuning: TuningPreset, overrides?: PianoSampleOverrideMap) {
@@ -229,7 +231,7 @@ export function findNearestPianoSample(targetFrequency: number): PianoSampleDefi
   let nearestDistance = Infinity;
 
   for (const sample of activePianoSamples) {
-    const distance = Math.abs(Math.log2(targetFrequency / sample.baseFrequency));
+    const distance = Math.abs(Math.log2(targetFrequency / sample.referenceFrequency));
     if (distance < nearestDistance) {
       nearest = sample;
       nearestDistance = distance;

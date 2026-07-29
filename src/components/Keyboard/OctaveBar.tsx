@@ -1,13 +1,12 @@
 import React from 'react';
-import {ChevronLeft, ChevronRight, ZoomIn, ZoomOut} from 'lucide-react';
+import {ZoomIn, ZoomOut} from 'lucide-react';
 
 interface OctaveBarProps {
   label?: string;
-  octaveOffset: number;
-  onChangeOctaveOffset: (offset: number) => void;
   scrollOffset: number;
   onChangeScrollOffset: (offset: number) => void;
   maxScrollOffset: number;
+  octaveSpan: number;
   keyWidth: number;
   onChangeKeyWidth: (width: number) => void;
   actions?: React.ReactNode;
@@ -17,11 +16,10 @@ const SCROLL_STEP = 1;
 
 export const OctaveBar: React.FC<OctaveBarProps> = ({
   label,
-  octaveOffset,
-  onChangeOctaveOffset,
   scrollOffset,
   onChangeScrollOffset,
   maxScrollOffset,
+  octaveSpan,
   keyWidth,
   onChangeKeyWidth,
   actions,
@@ -33,26 +31,14 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {label && <span className="mr-1 text-[11px] font-bold text-sky-400">{label}</span>}
 
-        <span className="text-[10px] font-medium text-slate-400">オクターブ</span>
+        <span className="text-[10px] font-medium text-slate-400">表示位置</span>
         <button
-          onClick={() => onChangeOctaveOffset(octaveOffset - 1)}
-          className="rounded border border-[#30363d] bg-[#21262d] p-1 text-slate-200 transition-colors hover:bg-slate-700"
-          title="1オクターブ下げる"
+          onClick={() => onChangeScrollOffset(clampedScroll - octaveSpan)}
+          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
+          title="1オクターブ左へ"
         >
-          <ChevronLeft className="h-3.5 w-3.5" />
+          -1oct
         </button>
-        <div className="flex min-w-[52px] items-center justify-center rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5 font-mono font-bold text-sky-300">
-          {octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset} oct
-        </div>
-        <button
-          onClick={() => onChangeOctaveOffset(octaveOffset + 1)}
-          className="rounded border border-[#30363d] bg-[#21262d] p-1 text-slate-200 transition-colors hover:bg-slate-700"
-          title="1オクターブ上げる"
-        >
-          <ChevronRight className="h-3.5 w-3.5" />
-        </button>
-
-        <span className="ml-1 text-[10px] font-medium text-slate-400">表示位置</span>
         <button
           onClick={() => onChangeScrollOffset(clampedScroll - SCROLL_STEP)}
           className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
@@ -75,6 +61,13 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
           title="右へ1つ"
         >
           +1
+        </button>
+        <button
+          onClick={() => onChangeScrollOffset(clampedScroll + octaveSpan)}
+          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
+          title="1オクターブ右へ"
+        >
+          +1oct
         </button>
         <div className="flex min-w-[48px] items-center justify-center rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5 font-mono font-bold text-emerald-300">
           {Math.round(clampedScroll)}
