@@ -18,6 +18,7 @@ type DragState = {
 
 const MIN_SEGMENT_SIZE = 0.04;
 const SNAP_DISTANCE = 0.03;
+const PREVIEW_COLUMNS = 4;
 
 export const LaneBoundaryEditor: React.FC<LaneBoundaryEditorProps> = ({
   layout,
@@ -99,30 +100,29 @@ export const LaneBoundaryEditor: React.FC<LaneBoundaryEditorProps> = ({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-xs text-slate-300">
-        使用中の段数ごとに、高さテンプレートを白鍵用・黒鍵用で調整します。上側が黒鍵プレビューです。既存の境界位置に近づくと吸い付きます。
+      <div className="rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-xs leading-relaxed text-slate-300">
+        使用中の段数ごとに、白鍵側と黒鍵側の高さテンプレートを直接ドラッグします。列全体が鍵盤プレビューになっており、
+        近い高さへ寄せたいときは既存テンプレートに吸い付きます。
       </div>
 
       <TemplateGroup
         title="黒鍵側テンプレート"
+        description="上側に配置される黒鍵の段を調整します。"
         isBlack
         layout={layout}
         depthGroups={usedDepthGroups.black}
         onStartDrag={setDragState}
-        onReset={(activeDepths) =>
-          updateTemplate(layout, true, activeDepths, undefined, onUpdateLayout)
-        }
+        onReset={(activeDepths) => updateTemplate(layout, true, activeDepths, undefined, onUpdateLayout)}
       />
 
       <TemplateGroup
         title="白鍵側テンプレート"
+        description="下側に配置される白鍵の段を調整します。"
         isBlack={false}
         layout={layout}
         depthGroups={usedDepthGroups.white}
         onStartDrag={setDragState}
-        onReset={(activeDepths) =>
-          updateTemplate(layout, false, activeDepths, undefined, onUpdateLayout)
-        }
+        onReset={(activeDepths) => updateTemplate(layout, false, activeDepths, undefined, onUpdateLayout)}
       />
     </div>
   );
@@ -166,6 +166,7 @@ function updateTemplate(
 
 interface TemplateGroupProps {
   title: string;
+  description: string;
   isBlack: boolean;
   layout: LayoutPreset;
   depthGroups: number[];
@@ -175,6 +176,7 @@ interface TemplateGroupProps {
 
 const TemplateGroup: React.FC<TemplateGroupProps> = ({
   title,
+  description,
   isBlack,
   layout,
   depthGroups,
@@ -184,11 +186,12 @@ const TemplateGroup: React.FC<TemplateGroupProps> = ({
   <div className="flex flex-col gap-3 rounded-lg border border-[#30363d] bg-[#161b22] p-4 shadow-sm">
     <div className="border-b border-[#30363d] pb-2">
       <h3 className="text-sm font-bold text-slate-100">{title}</h3>
+      <p className="mt-1 text-xs text-slate-400">{description}</p>
     </div>
 
     {depthGroups.length === 0 ? (
       <div className="rounded border border-[#30363d] bg-[#0d1117] px-3 py-5 text-center text-[11px] text-slate-500">
-        2段以上で使われているテンプレートはありません。
+        使用中のテンプレートがまだありません。
       </div>
     ) : (
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -223,31 +226,45 @@ const TemplateCard: React.FC<TemplateCardProps> = ({
   onReset,
 }) => {
   const segmentHeights = getSegmentHeightsFromBoundaries(boundaries);
-  const accentClass = isBlack ? 'bg-slate-900 text-slate-300 border-slate-700' : 'bg-slate-200 text-slate-600 border-slate-300';
+  const accentClass = isBlack
+    ? 'border-slate-800 bg-gradient-to-b from-slate-900 to-black text-slate-300'
+    : 'border-slate-300 bg-white text-slate-700';
 
   return (
-    <div className="rounded border border-[#30363d] bg-[#0d1117] p-3">
-      <div className="mb-2 flex items-center justify-between text-[11px] font-bold text-slate-300">
-        <span>{activeDepths} 段</span>
-        <button onClick={onReset} className="rounded border border-[#30363d] px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-[#161b22]">
+    <div className="rounded-xl border border-[#30363d] bg-[#0d1117] p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div>
+          <div className="text-xs font-bold text-slate-100">{activeDepths} 段</div>
+          <div className="text-[10px] text-slate-500">ドラッグで境界を移動</div>
+        </div>
+        <button
+          onClick={onReset}
+          className="rounded border border-[#30363d] px-2 py-1 text-[10px] text-slate-300 transition-colors hover:bg-[#161b22]"
+        >
           リセット
         </button>
       </div>
 
-      <div className="relative h-48 overflow-hidden rounded border border-[#30363d] bg-[#161b22]">
-        <div className="absolute inset-0 flex flex-col">
-          {segmentHeights.map((heightRatio, index) => {
-            const depth = activeDepths - 1 - index;
-            return (
-              <div
-                key={`segment_${activeDepths}_${depth}`}
-                className={`relative flex items-center justify-center border-b text-[10px] font-bold ${accentClass}`}
-                style={{height: `${heightRatio * 100}%`}}
-              >
-                d{depth}
+      <div className="relative h-52 overflow-hidden rounded-lg border border-[#30363d] bg-[#11161d] p-2">
+        <div className="grid h-full grid-cols-4 gap-1.5">
+          {Array.from({length: PREVIEW_COLUMNS}, (_, columnIndex) => (
+            <div key={`preview_${columnIndex}`} className="relative overflow-hidden rounded-md border border-[#30363d] bg-[#0b1016]">
+              <div className="absolute inset-0 flex flex-col">
+                {segmentHeights.map((heightRatio, index) => {
+                  const depth = activeDepths - 1 - index;
+                  return (
+                    <div
+                      key={`segment_${columnIndex}_${depth}`}
+                      className={`relative flex items-center justify-center border-b text-[10px] font-bold ${accentClass}`}
+                      style={{height: `${heightRatio * 100}%`}}
+                    >
+                      d{depth}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
 
         {boundaries.slice(1, -1).map((value, offset) => {
@@ -265,12 +282,13 @@ const TemplateCard: React.FC<TemplateCardProps> = ({
                   startValue: value,
                 });
               }}
-              className="absolute left-0 z-10 h-4 w-full -translate-y-1/2 cursor-row-resize touch-none"
-              style={{top: `${value * 100}%`}}
-              title="境界を調整"
+              className="absolute left-2 right-2 z-10 h-5 -translate-y-1/2 cursor-row-resize touch-none"
+              style={{top: `calc(${value * 100}% - 1px)`}}
+              title="境界を上下に移動"
+              aria-label="境界を上下に移動"
             >
-              <span className="absolute left-2 right-2 top-1/2 h-[2px] -translate-y-1/2 rounded bg-white/90 shadow-[0_0_0_1px_rgba(15,23,42,0.6)]" />
-              <span className="absolute left-1/2 top-1/2 h-3 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-950/60 bg-white/90" />
+              <span className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded bg-sky-300 shadow-[0_0_0_1px_rgba(8,47,73,0.8)]" />
+              <span className="absolute left-1/2 top-1/2 h-3.5 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border border-sky-950 bg-sky-200" />
             </button>
           );
         })}

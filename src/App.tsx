@@ -460,12 +460,13 @@ export default function App() {
                 onClick={() => setActiveMode('keyboard')}
                 className="rounded border border-[#30363d] bg-[#0d1117] px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:bg-[#21262d]"
               >
-                鍵盤へ戻る
+                演奏へ戻る
               </button>
               <button
                 onClick={() => setIsSidebarOpen(true)}
                 className="rounded border border-[#30363d] bg-[#0d1117] p-1.5 text-slate-200 transition-colors hover:bg-[#21262d]"
                 title="メニュー"
+                aria-label="メニューを開く"
               >
                 <Menu size={14} />
               </button>
@@ -502,6 +503,7 @@ const HeaderActions: React.FC<{
           : 'border-[#30363d] bg-[#161b22] text-slate-300 hover:bg-[#21262d]'
       }`}
       title="サステイン固定"
+      aria-label="サステイン固定"
     >
       Sus
     </button>
@@ -509,6 +511,7 @@ const HeaderActions: React.FC<{
       onClick={onAllNotesOff}
       className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[10px] text-slate-300 transition-colors hover:bg-[#21262d]"
       title="音を止める"
+      aria-label="音を止める"
     >
       <VolumeX size={12} />
     </button>
@@ -516,6 +519,7 @@ const HeaderActions: React.FC<{
       onClick={onOpenMenu}
       className="rounded border border-[#30363d] bg-[#161b22] p-1.5 text-slate-200 transition-colors hover:bg-[#21262d]"
       title="メニュー"
+      aria-label="メニューを開く"
     >
       <Menu size={14} />
     </button>

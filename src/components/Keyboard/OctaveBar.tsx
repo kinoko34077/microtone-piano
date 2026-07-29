@@ -1,5 +1,5 @@
 import React from 'react';
-import {ZoomIn, ZoomOut} from 'lucide-react';
+import {MoveHorizontal, ZoomIn, ZoomOut} from 'lucide-react';
 
 interface OctaveBarProps {
   label?: string;
@@ -27,81 +27,100 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
   const clampedScroll = Math.max(0, Math.min(maxScrollOffset, scrollOffset));
 
   return (
-    <div className="flex select-none items-center justify-between gap-2 border-b border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-        {label && <span className="mr-1 text-[11px] font-bold text-sky-400">{label}</span>}
+    <div className="border-b border-[#30363d] bg-[#0d1117] px-2 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {label && (
+          <div className="rounded border border-sky-800/80 bg-sky-950/60 px-2 py-1 text-[11px] font-bold text-sky-300">
+            {label}
+          </div>
+        )}
 
-        <span className="text-[10px] font-medium text-slate-400">表示位置</span>
-        <button
-          onClick={() => onChangeScrollOffset(clampedScroll - octaveSpan)}
-          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
-          title="1オクターブ左へ"
-        >
-          -1oct
-        </button>
-        <button
-          onClick={() => onChangeScrollOffset(clampedScroll - SCROLL_STEP)}
-          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
-          title="左へ1つ"
-        >
-          -1
-        </button>
-        <input
-          type="range"
-          min="0"
-          max={Math.max(0, maxScrollOffset)}
-          step={SCROLL_STEP}
-          value={Math.round(clampedScroll)}
-          onChange={(event) => onChangeScrollOffset(Number(event.target.value))}
-          className="h-1 w-24 min-w-0 flex-1 cursor-pointer appearance-none rounded bg-[#30363d] accent-emerald-500"
-        />
-        <button
-          onClick={() => onChangeScrollOffset(clampedScroll + SCROLL_STEP)}
-          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
-          title="右へ1つ"
-        >
-          +1
-        </button>
-        <button
-          onClick={() => onChangeScrollOffset(clampedScroll + octaveSpan)}
-          className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
-          title="1オクターブ右へ"
-        >
-          +1oct
-        </button>
-        <div className="flex min-w-[48px] items-center justify-center rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5 font-mono font-bold text-emerald-300">
-          {Math.round(clampedScroll)}
+        <div className="flex min-w-[220px] flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#30363d] bg-[#11161d] px-2 py-1.5">
+          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <MoveHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            表示位置
+          </div>
+          <div className="flex items-center gap-1">
+            <StepButton label="1オクターブ左へ" onClick={() => onChangeScrollOffset(clampedScroll - octaveSpan)}>
+              -1oct
+            </StepButton>
+            <StepButton label="左へ1つ" onClick={() => onChangeScrollOffset(clampedScroll - SCROLL_STEP)}>
+              -1
+            </StepButton>
+          </div>
+          <input
+            aria-label="表示位置"
+            type="range"
+            min="0"
+            max={Math.max(0, maxScrollOffset)}
+            step={SCROLL_STEP}
+            value={Math.round(clampedScroll)}
+            onChange={(event) => onChangeScrollOffset(Number(event.target.value))}
+            className="h-1.5 min-w-[110px] flex-1 cursor-pointer appearance-none rounded bg-[#30363d] accent-emerald-500"
+          />
+          <div className="flex items-center gap-1">
+            <StepButton label="右へ1つ" onClick={() => onChangeScrollOffset(clampedScroll + SCROLL_STEP)}>
+              +1
+            </StepButton>
+            <StepButton label="1オクターブ右へ" onClick={() => onChangeScrollOffset(clampedScroll + octaveSpan)}>
+              +1oct
+            </StepButton>
+          </div>
+          <div className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[10px] font-mono font-bold text-emerald-300">
+            {Math.round(clampedScroll)}
+          </div>
         </div>
 
-        <span className="hidden text-[10px] font-medium text-slate-400 sm:inline">鍵盤幅</span>
-        <div className="flex items-center gap-1.5 rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5">
+        <div className="flex items-center gap-2 rounded-lg border border-[#30363d] bg-[#11161d] px-2 py-1.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">鍵盤幅</div>
           <button
+            type="button"
             onClick={() => onChangeKeyWidth(Math.max(24, keyWidth - 4))}
-            className="text-slate-400 transition-colors hover:text-white"
+            aria-label="鍵盤幅を狭くする"
             title="鍵盤幅を狭くする"
+            className="rounded border border-[#30363d] bg-[#161b22] p-1 text-slate-300 transition-colors hover:bg-[#21262d] hover:text-white"
           >
             <ZoomOut className="h-3 w-3" />
           </button>
           <input
+            aria-label="鍵盤幅"
             type="range"
             min="24"
             max="120"
             value={keyWidth}
             onChange={(event) => onChangeKeyWidth(Number(event.target.value))}
-            className="h-1 w-14 cursor-pointer appearance-none rounded bg-[#30363d] accent-sky-500"
+            className="h-1.5 w-20 cursor-pointer appearance-none rounded bg-[#30363d] accent-sky-500"
           />
           <button
+            type="button"
             onClick={() => onChangeKeyWidth(Math.min(120, keyWidth + 4))}
-            className="text-slate-400 transition-colors hover:text-white"
+            aria-label="鍵盤幅を広くする"
             title="鍵盤幅を広くする"
+            className="rounded border border-[#30363d] bg-[#161b22] p-1 text-slate-300 transition-colors hover:bg-[#21262d] hover:text-white"
           >
             <ZoomIn className="h-3 w-3" />
           </button>
-          <span className="w-8 text-right text-[10px] font-bold text-sky-400">{keyWidth}px</span>
+          <span className="w-10 text-right text-[10px] font-bold text-sky-300">{keyWidth}px</span>
         </div>
-      </div>
 
-      {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+        {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
+      </div>
     </div>
   );
 };
+
+const StepButton: React.FC<{
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}> = ({label, onClick, children}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={label}
+    title={label}
+    className="rounded border border-[#30363d] bg-[#161b22] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
+  >
+    {children}
+  </button>
+);

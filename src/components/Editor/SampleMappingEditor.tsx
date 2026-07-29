@@ -50,7 +50,7 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
         <div>
           <h3 className="text-sm font-bold text-slate-100">外部音源マッピング</h3>
           <p className="mt-0.5 text-xs text-slate-400">
-            `Grand Piano/` 内の各サンプルに、現在の音高IDとオクターブを対応づけます。
+            `Grand Piano/` 配下のサンプルに対して、基準 pitch ID とオクターブを対応づけます。
           </p>
         </div>
 
@@ -68,10 +68,10 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
           <thead>
             <tr className="border-b border-[#30363d] bg-[#0d1117] text-slate-300">
               <th className="p-2.5">ファイル</th>
-              <th className="p-2.5">音高ID</th>
+              <th className="p-2.5">基準 pitch ID</th>
               <th className="p-2.5">オクターブ</th>
               <th className="p-2.5">対応音名</th>
-              <th className="p-2.5">推定周波数</th>
+              <th className="p-2.5">対応周波数</th>
               <th className="p-2.5 text-right">操作</th>
             </tr>
           </thead>
