@@ -65,8 +65,8 @@ const pitch256Test: PitchDefinition[] = Array.from({length: 255}, (_, i) => ({
 
 export const STANDARD_TUNING_12EDO: TuningPreset = {
   id: 'standard-tuning-12edo',
-  name: '標準 12EDO 音律',
-  description: '通常の12平均律。1オクターブ=12音。',
+  name: '標準 12EDO 音高',
+  description: '一般的な12平均律の1オクターブ12音です。',
   isStandard: true,
   periodCents: 1200,
   baseAddress: encodeAddress(0, false, 0),
@@ -79,8 +79,8 @@ export const STANDARD_TUNING_12EDO: TuningPreset = {
 
 export const STANDARD_TUNING_24EDO: TuningPreset = {
   id: 'standard-tuning-24edo',
-  name: '標準 24EDO 音律',
-  description: '四分音を含む24平均律。1オクターブ=24音。',
+  name: '標準 24EDO 音高',
+  description: '24平均律の1オクターブ24音です。',
   isStandard: true,
   periodCents: 1200,
   baseAddress: encodeAddress(0, false, 0),
@@ -93,8 +93,8 @@ export const STANDARD_TUNING_24EDO: TuningPreset = {
 
 export const STANDARD_TUNING_31EDO: TuningPreset = {
   id: 'standard-tuning-31edo',
-  name: '標準 31EDO 音律',
-  description: '31平均律。多段鍵盤向けの細かい分割。',
+  name: '標準 31EDO 音高',
+  description: '31平均律を多段鍵盤向けに並べた定義です。',
   isStandard: true,
   periodCents: 1200,
   baseAddress: encodeAddress(0, false, 0),
@@ -107,8 +107,8 @@ export const STANDARD_TUNING_31EDO: TuningPreset = {
 
 export const STANDARD_TUNING_256TEST: TuningPreset = {
   id: 'standard-tuning-256test',
-  name: '256番地テスト音律',
-  description: '255音を順番に並べた確認用音律。',
+  name: '256段テスト音高',
+  description: '255音を並べたテスト用の音高セットです。',
   isStandard: true,
   periodCents: 1200,
   baseAddress: 0,
@@ -138,7 +138,6 @@ const create12EdoLayoutMapping = (): number[] => {
     const octave = Math.floor(x / 7);
     const keyInOctave = x % 7;
     const baseStep = octave * 12 + whiteStepsInOctave[keyInOctave];
-
     mapping[encodeAddress(x, false, 0)] = baseStep;
 
     if (blackStepsInOctave[keyInOctave] !== undefined) {
@@ -267,8 +266,8 @@ const create256TestLayoutMapping = (): number[] => {
 
 export const STANDARD_LAYOUT_12EDO: LayoutPreset = {
   id: 'standard-layout-12edo',
-  name: '標準 12EDO 配置',
-  description: '一般的な7列の12EDO配列。',
+  name: '標準 12EDO 鍵盤配置',
+  description: '1段の12EDO鍵盤です。',
   isStandard: true,
   defaultTuningId: 'standard-tuning-12edo',
   horizontalCount: 7,
@@ -280,8 +279,8 @@ export const STANDARD_LAYOUT_12EDO: LayoutPreset = {
 
 export const STANDARD_LAYOUT_24EDO: LayoutPreset = {
   id: 'standard-layout-24edo',
-  name: '24EDO 2段配置',
-  description: '白鍵2段・黒鍵2段の24EDO配置。',
+  name: '24EDO 2段鍵盤配置',
+  description: '白鍵2段、黒鍵2段の24EDO配置です。',
   isStandard: true,
   defaultTuningId: 'standard-tuning-24edo',
   horizontalCount: 7,
@@ -293,8 +292,8 @@ export const STANDARD_LAYOUT_24EDO: LayoutPreset = {
 
 export const STANDARD_LAYOUT_31EDO: LayoutPreset = {
   id: 'standard-layout-31edo',
-  name: '31EDO 多段配置',
-  description: '白鍵3段・黒鍵2段の31EDO配置。',
+  name: '31EDO 多段鍵盤配置',
+  description: '白鍵3段、黒鍵2段の31EDO配置です。',
   isStandard: true,
   defaultTuningId: 'standard-tuning-31edo',
   horizontalCount: 7,
@@ -306,8 +305,8 @@ export const STANDARD_LAYOUT_31EDO: LayoutPreset = {
 
 export const STANDARD_LAYOUT_256TEST: LayoutPreset = {
   id: 'standard-layout-256test',
-  name: '256番地テスト配置',
-  description: '全256番地を順番に確認するための配置。',
+  name: '256段テスト配置',
+  description: '全256区画を埋めたテスト用配置です。',
   isStandard: true,
   lanes: Array.from({length: 32}, () => ({activeDepths: 8})),
   mapping: create256TestLayoutMapping(),
@@ -318,7 +317,7 @@ export const STANDARD_LAYOUT_256TEST: LayoutPreset = {
 export const STANDARD_LAYOUT_EMPTY: LayoutPreset = {
   id: 'standard-layout-empty',
   name: '空のカスタム配置',
-  description: '全番地が未割当の新規作成用配置。',
+  description: '全区画が未割当の新規作成用配置です。',
   isStandard: true,
   lanes: Array.from({length: 32}, () => ({activeDepths: 8})),
   mapping: new Array<number>(256).fill(-1),

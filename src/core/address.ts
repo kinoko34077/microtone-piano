@@ -1,5 +1,5 @@
 /**
- * 鍵盤番地 (`xxxx c ddd`) の変換ユーティリティ
+ * 鍵盤番地 (`xxxx c ddd`) のユーティリティ
  */
 
 export interface DecodedAddress {

@@ -64,6 +64,9 @@ export default function App() {
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
   const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
   const saveTimerRef = useRef<number | null>(null);
+  const currentLayoutRef = useRef<LayoutPreset>(STANDARD_LAYOUT_12EDO);
+  const currentTuningRef = useRef<TuningPreset>(STANDARD_TUNING_12EDO);
+  const pcPressedMapRef = useRef<Map<string, PressedPcKey>>(new Map());
 
   const upperColumnRange = useMemo(
     () => getKeyboardColumnRange(currentLayout, currentTuning, 0),
@@ -80,11 +83,16 @@ export default function App() {
       const tunings = await storageService.getAllTuningPresets();
       const rawSettings = await storageService.getSettings();
       const loadedSettings = normalizeSettings(rawSettings);
+      const initialLayout =
+        layouts.find((layout) => layout.id === loadedSettings.defaultLayoutPresetId) ?? STANDARD_LAYOUT_12EDO;
       const initialTuning =
-        tunings.find((tuning) => tuning.id === loadedSettings.defaultPitchPresetId) ?? STANDARD_TUNING_12EDO;
+        tunings.find((tuning) => tuning.id === loadedSettings.defaultPitchPresetId) ??
+        tunings.find((tuning) => tuning.id === initialLayout.defaultTuningId) ??
+        STANDARD_TUNING_12EDO;
 
       setAllLayouts(layouts);
       setAllTunings(tunings);
+      setCurrentLayout(initialLayout);
       setCurrentTuning(initialTuning);
       setSettings(loadedSettings);
 
@@ -105,6 +113,10 @@ export default function App() {
     globalAudioEngine.setOutOfRangeNoticeCallback((notice) => {
       setNotices((prev) => [...prev.slice(-7), notice]);
     });
+
+    return () => {
+      globalAudioEngine.setOutOfRangeNoticeCallback(() => {});
+    };
   }, []);
 
   useEffect(() => {
@@ -152,6 +164,18 @@ export default function App() {
     setPianoSampleOverrides(currentTuning, settings.pianoSampleOverrides);
   }, [currentTuning, settings.pianoSampleOverrides]);
 
+  useEffect(() => {
+    currentLayoutRef.current = currentLayout;
+  }, [currentLayout]);
+
+  useEffect(() => {
+    currentTuningRef.current = currentTuning;
+  }, [currentTuning]);
+
+  useEffect(() => {
+    pcPressedMapRef.current = pcPressedMap;
+  }, [pcPressedMap]);
+
   const handleToggleSustainLatch = useCallback(() => {
     const next = !settings.sustainLatch;
     handleUpdateSettings({...settings, sustainLatch: next});
@@ -172,6 +196,7 @@ export default function App() {
     };
     setAllLayouts((prev) => [...prev, duplicate]);
     setCurrentLayout(duplicate);
+    setSettings((prev) => normalizeSettings({...prev, defaultLayoutPresetId: duplicate.id}));
     void storageService.saveLayoutPreset(duplicate);
   }, [currentLayout]);
 
@@ -184,6 +209,7 @@ export default function App() {
     };
     setAllTunings((prev) => [...prev, duplicate]);
     setCurrentTuning(duplicate);
+    setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: duplicate.id}));
     void storageService.saveTuningPreset(duplicate);
   }, [currentTuning]);
 
@@ -207,12 +233,19 @@ export default function App() {
     (layout: LayoutPreset) => {
       globalAudioEngine.allNotesOff();
       setCurrentLayout(layout);
-      if (layout.defaultTuningId) {
-        const matched = allTunings.find((tuning) => tuning.id === layout.defaultTuningId);
-        if (matched) {
-          setCurrentTuning(matched);
-        }
+      const matched = layout.defaultTuningId
+        ? allTunings.find((tuning) => tuning.id === layout.defaultTuningId)
+        : undefined;
+      if (matched) {
+        setCurrentTuning(matched);
       }
+      setSettings((prev) =>
+        normalizeSettings({
+          ...prev,
+          defaultLayoutPresetId: layout.id,
+          defaultPitchPresetId: matched?.id ?? prev.defaultPitchPresetId,
+        }),
+      );
     },
     [allTunings],
   );
@@ -220,6 +253,7 @@ export default function App() {
   const handleSelectTuning = useCallback((tuning: TuningPreset) => {
     globalAudioEngine.allNotesOff();
     setCurrentTuning(tuning);
+    setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: tuning.id}));
   }, []);
 
   const handleUpdateLayout = useCallback((newLayout: LayoutPreset) => {
@@ -232,6 +266,7 @@ export default function App() {
       });
       setAllLayouts((prev) => [...prev, duplicate]);
       setCurrentLayout(duplicate);
+      setSettings((prev) => normalizeSettings({...prev, defaultLayoutPresetId: duplicate.id}));
       void storageService.saveLayoutPreset(duplicate);
       return;
     }
@@ -251,6 +286,7 @@ export default function App() {
       });
       setAllTunings((prev) => [...prev, duplicate]);
       setCurrentTuning(duplicate);
+      setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: duplicate.id}));
       void storageService.saveTuningPreset(duplicate);
       return;
     }
@@ -271,7 +307,7 @@ export default function App() {
     const releasePcHeldNotes = () => {
       globalAudioEngine.setSustainMomentary(false);
       setPcPressedMap((prev) => {
-        prev.forEach(({voiceId}) => globalAudioEngine.noteOff(voiceId));
+        pcPressedMapRef.current.forEach(({voiceId}) => globalAudioEngine.noteOff(voiceId));
         return new Map();
       });
     };
@@ -288,22 +324,24 @@ export default function App() {
       }
 
       const address = keyToAddress(event.key, settings.pcDepthOffset);
-      if (address === null || pcPressedMap.has(event.key)) {
+      if (address === null || pcPressedMapRef.current.has(event.key)) {
         return;
       }
 
       event.preventDefault();
-      const pitchRef = currentLayout.mapping[address];
+      const activeLayout = currentLayoutRef.current;
+      const activeTuning = currentTuningRef.current;
+      const pitchRef = activeLayout.mapping[address];
       if (pitchRef === undefined || pitchRef === -1) {
         return;
       }
 
-      const {pitchDef, octaveShift} = resolvePitch(pitchRef, currentTuning);
+      const {pitchDef, octaveShift} = resolvePitch(pitchRef, activeTuning);
       if (!pitchDef) {
         return;
       }
 
-      const frequency = calculateFrequency(pitchDef, currentTuning, octaveShift);
+      const frequency = calculateFrequency(pitchDef, activeTuning, octaveShift);
       const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, 1.0, `pc_${event.key}`);
       setPcPressedMap((prev) => new Map(prev).set(event.key, {voiceId, address}));
       setEditorSelectedAddress(address);
@@ -320,7 +358,7 @@ export default function App() {
         return;
       }
 
-      const pressed = pcPressedMap.get(event.key);
+      const pressed = pcPressedMapRef.current.get(event.key);
       if (!pressed) {
         return;
       }
@@ -354,7 +392,7 @@ export default function App() {
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentLayout, currentTuning, pcPressedMap, settings.pcDepthOffset]);
+  }, [settings.pcDepthOffset]);
 
   const pressedAddressSet = useMemo(() => {
     const next = new Set<number>();
@@ -457,12 +495,14 @@ export default function App() {
           <div className="flex h-full flex-col gap-3">
             <div className="flex items-center justify-between rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2">
               <button
+                type="button"
                 onClick={() => setActiveMode('keyboard')}
                 className="rounded border border-[#30363d] bg-[#0d1117] px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:bg-[#21262d]"
               >
                 演奏へ戻る
               </button>
               <button
+                type="button"
                 onClick={() => setIsSidebarOpen(true)}
                 className="rounded border border-[#30363d] bg-[#0d1117] p-1.5 text-slate-200 transition-colors hover:bg-[#21262d]"
                 title="メニュー"
@@ -471,6 +511,7 @@ export default function App() {
                 <Menu size={14} />
               </button>
             </div>
+
             <PresetEditor
               layout={currentLayout}
               tuning={currentTuning}
@@ -496,18 +537,20 @@ const HeaderActions: React.FC<{
 }> = ({sustainLatch, onToggleSustainLatch, onAllNotesOff, onOpenMenu}) => (
   <>
     <button
+      type="button"
       onClick={onToggleSustainLatch}
       className={`rounded border px-2 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors ${
         sustainLatch
           ? 'border-amber-400 bg-amber-400/95 text-slate-950'
           : 'border-[#30363d] bg-[#161b22] text-slate-300 hover:bg-[#21262d]'
       }`}
-      title="サステイン固定"
-      aria-label="サステイン固定"
+      title="サステイン保持"
+      aria-label="サステイン保持"
     >
       Sus
     </button>
     <button
+      type="button"
       onClick={onAllNotesOff}
       className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[10px] text-slate-300 transition-colors hover:bg-[#21262d]"
       title="音を止める"
@@ -516,6 +559,7 @@ const HeaderActions: React.FC<{
       <VolumeX size={12} />
     </button>
     <button
+      type="button"
       onClick={onOpenMenu}
       className="rounded border border-[#30363d] bg-[#161b22] p-1.5 text-slate-200 transition-colors hover:bg-[#21262d]"
       title="メニュー"

@@ -77,7 +77,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (!isOpen) {
       return;
     }
-
     closeButtonRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -85,20 +84,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onClose();
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  const toggleSection = (sectionId: SectionId) => {
-    setOpenSections((prev) => ({...prev, [sectionId]: !prev[sectionId]}));
-  };
-
-  const sortedLayoutOptions = useMemo(
+  const sortedLayouts = useMemo(
     () => [...allLayouts].sort((a, b) => Number(Boolean(a.isStandard)) - Number(Boolean(b.isStandard)) || a.name.localeCompare(b.name, 'ja')),
     [allLayouts],
   );
-  const sortedTuningOptions = useMemo(
+  const sortedTunings = useMemo(
     () => [...allTunings].sort((a, b) => Number(Boolean(a.isStandard)) - Number(Boolean(b.isStandard)) || a.name.localeCompare(b.name, 'ja')),
     [allTunings],
   );
@@ -106,6 +100,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   if (!isOpen) {
     return null;
   }
+
+  const toggleSection = (sectionId: SectionId) => {
+    setOpenSections((prev) => ({...prev, [sectionId]: !prev[sectionId]}));
+  };
 
   const handleExportJsonPackage = () => {
     const pkg = {
@@ -115,7 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       layoutPreset: currentLayout,
       tuningPreset: currentTuning,
     };
-    storageService.exportAsJson(pkg, `microtonal_${currentLayout.name}_${currentTuning.name}.json`);
+    storageService.exportAsJson(pkg, `microtone_${currentLayout.name}_${currentTuning.name}.json`);
   };
 
   const handleExportBinaryPackage = () => {
@@ -126,7 +124,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       layoutPreset: currentLayout,
       tuningPreset: currentTuning,
     };
-    storageService.exportAsBinaryPackage(pkg, `microtonal_${currentLayout.name}_${currentTuning.name}.bin`);
+    storageService.exportAsBinaryPackage(pkg, `microtone_${currentLayout.name}_${currentTuning.name}.bin`);
   };
 
   const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -147,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       } else if (data?.pitches) {
         onSelectTuning(data);
       } else {
-        window.alert('読み込めるプリセット形式ではありません。');
+        window.alert('読み込める形式ではありません。');
       }
     } catch (error: any) {
       window.alert(`読み込みに失敗しました: ${error.message}`);
@@ -165,21 +163,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
         role="dialog"
         aria-modal="true"
         aria-label="設定メニュー"
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[360px] flex-col overflow-hidden border-l border-[#30363d] bg-[#0d1117] text-slate-200 shadow-2xl"
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[380px] flex-col overflow-hidden border-l border-[#30363d] bg-[#0d1117] text-slate-200 shadow-2xl"
       >
-        <div className="sticky top-0 z-10 border-b border-[#30363d] bg-[#0d1117] px-4 py-3">
+        <div className="border-b border-[#30363d] bg-[#0d1117] px-4 py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="truncate text-sm font-bold text-sky-300">多段微分音 Web 鍵盤</h2>
-                <span className="rounded border border-sky-800 bg-sky-950 px-1.5 py-0.5 text-[10px] text-sky-300">v1.2</span>
+                <h2 className="truncate text-base font-bold text-sky-300">多段微分音 Web 鍵盤</h2>
+                <span className="rounded border border-sky-900 bg-sky-950 px-1.5 py-0.5 text-[10px] text-sky-300">menu</span>
               </div>
               <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-                演奏・表示・プリセット管理をここで切り替えます。
+                演奏画面と編集画面、音色、表示方法、プリセット入出力をここで管理します。
               </p>
             </div>
             <button
               ref={closeButtonRef}
+              type="button"
               onClick={onClose}
               aria-label="設定メニューを閉じる"
               className="rounded-md border border-[#30363d] bg-[#161b22] p-1.5 text-slate-300 transition-colors hover:bg-[#21262d]"
@@ -191,44 +190,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {notices.length > 0 && (
-            <section
-              aria-live="polite"
-              className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-700/70 bg-amber-950/40 p-3"
-            >
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
-                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            <section className="mb-4 rounded-xl border border-amber-700/70 bg-amber-950/30 p-3" aria-live="polite">
+              <div className="mb-2 flex items-center gap-2 text-xs font-bold text-amber-300">
+                <AlertTriangle className="h-4 w-4" />
                 音域外の通知
               </div>
-              {notices.map((notice) => (
-                <div key={notice.id} className="rounded-lg border border-amber-800/70 bg-[#161b22] p-2 text-xs">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="font-bold text-amber-200">{notice.frequency.toFixed(1)} Hz</div>
-                      <div className="mt-1 break-words text-[11px] leading-tight text-amber-300/90">{notice.message}</div>
+              <div className="space-y-2">
+                {notices.map((notice) => (
+                  <div key={notice.id} className="rounded-lg border border-amber-800/70 bg-[#161b22] p-2 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-bold text-amber-200">{notice.frequency.toFixed(1)} Hz</div>
+                        <div className="mt-1 text-[11px] leading-tight text-amber-300/90">{notice.message}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onDismissNotice(notice.id)}
+                        aria-label="通知を閉じる"
+                        className="rounded p-1 text-amber-400 hover:bg-amber-900/30 hover:text-amber-100"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => onDismissNotice(notice.id)}
-                      aria-label={`${notice.frequency.toFixed(1)}Hz の通知を閉じる`}
-                      className="shrink-0 rounded p-1 text-amber-400 hover:bg-amber-900/40 hover:text-amber-100"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </section>
           )}
 
           <div className="space-y-3">
             <DisclosureSection
               title="画面モード"
-              helper="演奏と編集を切り替えます。"
+              helper="演奏に戻るか、編集画面へ入るかを切り替えます。"
               icon={<Settings2 className="h-4 w-4" />}
               open={openSections.mode}
               onToggle={() => toggleSection('mode')}
             >
               <div className="flex rounded-lg border border-[#30363d] bg-[#010409] p-1">
                 <button
+                  type="button"
                   onClick={() => {
                     onChangeMode('keyboard');
                     onClose();
@@ -237,10 +237,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     activeMode === 'keyboard' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-[#161b22]'
                   }`}
                 >
-                  <Keyboard size={16} aria-hidden="true" />
+                  <Keyboard size={16} />
                   演奏
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     onChangeMode('editor');
                     onClose();
@@ -249,25 +250,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     activeMode === 'editor' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:bg-[#161b22]'
                   }`}
                 >
-                  <Edit3 size={16} aria-hidden="true" />
+                  <Edit3 size={16} />
                   編集
                 </button>
               </div>
             </DisclosureSection>
 
             <DisclosureSection
-              title="演奏"
-              helper="音色と減衰、緊急停止をまとめています。"
+              title="音と発音"
+              helper="音源、音量、減衰、全音停止を扱います。"
               icon={<VolumeX className="h-4 w-4" />}
               open={openSections.audio}
               onToggle={() => toggleSection('audio')}
             >
               <button
+                type="button"
                 onClick={() => globalAudioEngine.allNotesOff()}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-rose-800 bg-rose-950/60 px-3 py-2 text-rose-200 transition-colors hover:bg-rose-900"
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs font-bold text-rose-200 transition-colors hover:bg-rose-900/70"
               >
-                <VolumeX size={16} aria-hidden="true" />
-                <span className="text-xs font-bold">全発音停止</span>
+                <VolumeX size={16} />
+                全発音を停止
               </button>
 
               <Field>
@@ -287,6 +289,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <option value="square">矩形波</option>
                 </select>
               </Field>
+
+              <RangeBlock label="音量" valueLabel={`${Math.round(settings.masterVolume * 100)}%`}>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={settings.masterVolume}
+                  onChange={(event) => {
+                    const volume = Number(event.target.value);
+                    onUpdateSettings({...settings, masterVolume: volume});
+                    globalAudioEngine.setMasterVolume(volume);
+                  }}
+                  className="h-1.5 w-full cursor-pointer appearance-none rounded bg-[#30363d] accent-sky-500"
+                />
+              </RangeBlock>
 
               <RangeBlock
                 label="減衰"
@@ -311,13 +329,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <DisclosureSection
               title="プリセット"
-              helper="配置・音高の切り替え、複製、保存、入出力を行います。"
+              helper="鍵盤配置と音高プリセットを選択・複製・保存・入出力します。"
               icon={<Copy className="h-4 w-4" />}
               open={openSections.preset}
               onToggle={() => toggleSection('preset')}
             >
               <Field>
-                <FieldLabel htmlFor="layout-select">配置プリセット</FieldLabel>
+                <FieldLabel htmlFor="layout-select">鍵盤配置</FieldLabel>
                 <div className="flex gap-2">
                   <select
                     id="layout-select"
@@ -330,17 +348,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }}
                     className="min-w-0 flex-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-2 text-xs outline-none focus:border-sky-500"
                   >
-                    {sortedLayoutOptions.map((layout) => (
+                    {sortedLayouts.map((layout) => (
                       <option key={layout.id} value={layout.id}>
                         {layout.isStandard ? `[標準] ${layout.name}` : layout.name}
                       </option>
                     ))}
                   </select>
-                  <IconActionButton onClick={onDuplicateLayout} label="配置プリセットを複製">
+                  <IconActionButton onClick={onDuplicateLayout} label="鍵盤配置を複製">
                     <Copy size={14} />
                   </IconActionButton>
                   {!currentLayout.isStandard && (
-                    <IconActionButton onClick={onSaveLayout} label="配置プリセットを保存" accent="primary">
+                    <IconActionButton onClick={onSaveLayout} label="鍵盤配置を保存" accent="primary">
                       <Save size={14} />
                     </IconActionButton>
                   )}
@@ -361,7 +379,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }}
                     className="min-w-0 flex-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-2 text-xs outline-none focus:border-sky-500"
                   >
-                    {sortedTuningOptions.map((tuning) => (
+                    {sortedTunings.map((tuning) => (
                       <option key={tuning.id} value={tuning.id}>
                         {tuning.isStandard ? `[標準] ${tuning.name}` : tuning.name}
                       </option>
@@ -380,25 +398,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <div className="grid grid-cols-3 gap-2">
                 <button
+                  type="button"
                   onClick={handleExportJsonPackage}
                   className="flex items-center justify-center gap-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-2 text-[11px] text-slate-200 hover:bg-[#21262d]"
                 >
-                  <Download size={12} aria-hidden="true" />
+                  <Download size={12} />
                   JSON
                 </button>
                 <button
+                  type="button"
                   onClick={handleExportBinaryPackage}
                   className="flex items-center justify-center gap-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-2 text-[11px] text-amber-300 hover:bg-[#21262d]"
                 >
-                  <Download size={12} aria-hidden="true" />
+                  <Download size={12} />
                   BIN
                 </button>
                 <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   className="flex items-center justify-center gap-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-2 text-[11px] text-sky-300 hover:bg-[#21262d]"
                 >
-                  <Upload size={12} aria-hidden="true" />
-                  読み込み
+                  <Upload size={12} />
+                  読込
                 </button>
                 <input ref={fileInputRef} type="file" accept=".json,.bin" onChange={handleFileImport} className="hidden" />
               </div>
@@ -406,7 +427,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <DisclosureSection
               title="表示"
-              helper="演奏中に見た目や表示量を変える項目です。"
+              helper="鍵盤ラベルと描画サイズを調整します。"
               icon={<SlidersHorizontal className="h-4 w-4" />}
               open={openSections.display}
               onToggle={() => toggleSection('display')}
@@ -431,20 +452,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 checked={settings.showTwoRows}
                 onChange={(checked) => onUpdateSettings({...settings, showTwoRows: checked})}
                 label="上下2段で表示する"
-                helper="上下で別の幅とスクロール位置を持てます。"
+                helper="上下段で鍵幅とスクロール位置を個別に持てます。"
               />
 
               <ToggleField
                 checked={!!settings.showAddressBinary}
                 onChange={(checked) => onUpdateSettings({...settings, showAddressBinary: checked})}
                 label="番地と depth を表示する"
-                helper="編集やデバッグ向けです。通常演奏では非表示を推奨します。"
+                helper="デバッグや配置調整のための補助表示です。"
               />
 
-              <RangeBlock
-                label="黒鍵幅"
-                valueLabel={`${Math.round(settings.blackKeyWidthRatio * 100)}%`}
-              >
+              <RangeBlock label="黒鍵の幅" valueLabel={`${Math.round(settings.blackKeyWidthRatio * 100)}%`}>
                 <input
                   type="range"
                   min="0.3"
@@ -456,10 +474,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 />
               </RangeBlock>
 
-              <RangeBlock
-                label="黒鍵高さ"
-                valueLabel={`${Math.round(settings.blackKeyHeightRatio * 100)}%`}
-              >
+              <RangeBlock label="黒鍵の高さ" valueLabel={`${Math.round(settings.blackKeyHeightRatio * 100)}%`}>
                 <input
                   type="range"
                   min="0.3"
@@ -472,8 +487,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </RangeBlock>
 
               <RangeBlock
-                label="共通鍵盤幅"
-                helper="個別幅を触ると、演奏画面側のバーで上下別に変えられます。"
+                label="共通鍵幅"
+                helper="上下段の鍵幅を一括で揃えます。"
                 valueLabel={`${settings.keyWidth}px`}
               >
                 <input
@@ -493,7 +508,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <DisclosureSection
               title="詳細設定"
-              helper="頻繁には使わない表示・配置の補助設定です。"
+              helper="通常は変更しなくてよい調整項目です。"
               icon={<Settings2 className="h-4 w-4" />}
               open={openSections.advanced}
               onToggle={() => toggleSection('advanced')}
@@ -501,12 +516,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <ToggleField
                 checked={settings.showInvalidSections}
                 onChange={(checked) => onUpdateSettings({...settings, showInvalidSections: checked})}
-                label="無効領域を表示する"
-                helper="配置の確認用です。通常演奏ではオフ推奨です。"
+                label="無効区画を表示する"
+                helper="編集時に非表示区画も薄く見せます。"
               />
 
               <Field>
-                <FieldLabel htmlFor="invalid-section-mode">無効領域の扱い</FieldLabel>
+                <FieldLabel htmlFor="invalid-section-mode">無効区画の扱い</FieldLabel>
                 <select
                   id="invalid-section-mode"
                   value={currentLayout.invalidSectionMode}
@@ -515,15 +530,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 >
                   <option value="fixed">固定</option>
                   <option value="compressed">圧縮</option>
-                  <option value="custom">カスタム</option>
+                  <option value="custom">個別</option>
                 </select>
               </Field>
 
-              <RangeBlock label="PC鍵盤 depth オフセット" valueLabel={`${settings.pcDepthOffset}`}>
+              <RangeBlock label="PC 鍵盤 depth オフセット" valueLabel={`${settings.pcDepthOffset}`}>
                 <input
                   type="range"
                   min="0"
                   max="4"
+                  step="1"
                   value={settings.pcDepthOffset}
                   onChange={(event) => onUpdateSettings({...settings, pcDepthOffset: Number(event.target.value)})}
                   className="h-1.5 w-full cursor-pointer appearance-none rounded bg-[#30363d] accent-sky-500"
@@ -553,9 +569,7 @@ const DisclosureSection: React.FC<{
       className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
     >
       <div className="flex min-w-0 items-start gap-2">
-        <div className="mt-0.5 text-sky-300" aria-hidden="true">
-          {icon}
-        </div>
+        <div className="mt-0.5 text-sky-300">{icon}</div>
         <div className="min-w-0">
           <div className="text-xs font-bold text-slate-100">{title}</div>
           {helper && <div className="mt-1 text-[11px] leading-relaxed text-slate-400">{helper}</div>}
@@ -563,16 +577,13 @@ const DisclosureSection: React.FC<{
       </div>
       <ChevronDown
         className={`mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
-        aria-hidden="true"
       />
     </button>
     {open && <div className="space-y-3 border-t border-[#30363d] px-3 py-3">{children}</div>}
   </section>
 );
 
-const Field: React.FC<{children: React.ReactNode}> = ({children}) => (
-  <div className="flex flex-col gap-1.5">{children}</div>
-);
+const Field: React.FC<{children: React.ReactNode}> = ({children}) => <div className="flex flex-col gap-1.5">{children}</div>;
 
 const FieldLabel: React.FC<{htmlFor: string; children: React.ReactNode}> = ({htmlFor, children}) => (
   <label htmlFor={htmlFor} className="text-[11px] font-bold text-slate-300">

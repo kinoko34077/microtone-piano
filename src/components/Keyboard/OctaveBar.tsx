@@ -37,7 +37,7 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
 
         <div className="flex min-w-[220px] flex-1 flex-wrap items-center gap-2 rounded-lg border border-[#30363d] bg-[#11161d] px-2 py-1.5">
           <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-            <MoveHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            <MoveHorizontal className="h-3.5 w-3.5" />
             表示位置
           </div>
           <div className="flex items-center gap-1">
@@ -72,18 +72,18 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
         </div>
 
         <div className="flex items-center gap-2 rounded-lg border border-[#30363d] bg-[#11161d] px-2 py-1.5">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">鍵盤幅</div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">鍵幅</div>
           <button
             type="button"
             onClick={() => onChangeKeyWidth(Math.max(24, keyWidth - 4))}
-            aria-label="鍵盤幅を狭くする"
-            title="鍵盤幅を狭くする"
+            aria-label="鍵幅を狭くする"
+            title="鍵幅を狭くする"
             className="rounded border border-[#30363d] bg-[#161b22] p-1 text-slate-300 transition-colors hover:bg-[#21262d] hover:text-white"
           >
             <ZoomOut className="h-3 w-3" />
           </button>
           <input
-            aria-label="鍵盤幅"
+            aria-label="鍵幅"
             type="range"
             min="24"
             max="120"
@@ -94,8 +94,8 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
           <button
             type="button"
             onClick={() => onChangeKeyWidth(Math.min(120, keyWidth + 4))}
-            aria-label="鍵盤幅を広くする"
-            title="鍵盤幅を広くする"
+            aria-label="鍵幅を広くする"
+            title="鍵幅を広くする"
             className="rounded border border-[#30363d] bg-[#161b22] p-1 text-slate-300 transition-colors hover:bg-[#21262d] hover:text-white"
           >
             <ZoomIn className="h-3 w-3" />
