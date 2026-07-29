@@ -1,7 +1,7 @@
 import {TuningPreset} from '../types/keyboard';
 import {calculateFrequency, encodePitchReference, getFormattedPitchLabel, resolvePitch} from './pitch';
 
-export type PianoSampleRow = [fileName: string, baseFrequency: number, noteLabel: string];
+export type PianoSampleRow = [fileName: string, noteLabel: string, baseFrequency?: number];
 
 export interface PianoSampleDefinition {
   id: string;
@@ -14,10 +14,32 @@ export interface PianoSampleDefinition {
   octaveShift?: number;
 }
 
-export type PianoSampleOverrideMap = Record<string, {pitchId?: number; octaveShift?: number; baseFrequency?: number; noteLabel?: string}>;
+export type PianoSampleOverrideMap = Record<
+  string,
+  {pitchId?: number; octaveShift?: number; baseFrequency?: number; noteLabel?: string}
+>;
 
 const DEFAULT_OCTAVE_SEARCH_MIN = -8;
 const DEFAULT_OCTAVE_SEARCH_MAX = 8;
+const NOTE_INDEX: Record<string, number> = {
+  C: 0,
+  'C#': 1,
+  DB: 1,
+  D: 2,
+  'D#': 3,
+  EB: 3,
+  E: 4,
+  F: 5,
+  'F#': 6,
+  GB: 6,
+  G: 7,
+  'G#': 8,
+  AB: 8,
+  A: 9,
+  'A#': 10,
+  BB: 10,
+  B: 11,
+};
 
 const sampleUrls = import.meta.glob('../../Grand Piano/*.wav', {
   eager: true,
@@ -25,55 +47,82 @@ const sampleUrls = import.meta.glob('../../Grand Piano/*.wav', {
 }) as Record<string, string>;
 
 export const DEFAULT_PIANO_SAMPLE_ROWS: PianoSampleRow[] = [
-  ['FL Piano (1).wav', 27.56, 'A0'],
-  ['FL Piano (2).wav', 29.21, 'A#0'],
-  ['FL Piano (3).wav', 58.33, 'A#1'],
-  ['FL Piano (4).wav', 116.98, 'A#2'],
-  ['FL Piano (5).wav', 235.83, 'A#3'],
-  ['FL Piano (6).wav', 474.19, 'A#4'],
-  ['FL Piano (7).wav', 958.7, 'A#5'],
-  ['FL Piano (8).wav', 1917.39, 'A#6'],
-  ['FL Piano (9).wav', 1837.5, 'A#6'],
-  ['FL Piano (10).wav', 32.79, 'C1'],
-  ['FL Piano (11).wav', 65.82, 'C2'],
-  ['FL Piano (12).wav', 131.64, 'C3'],
-  ['FL Piano (13).wav', 264.07, 'C4'],
-  ['FL Piano (14).wav', 531.33, 'C5'],
-  ['FL Piano (15).wav', 1050.0, 'C6'],
-  ['FL Piano (16).wav', 2100.0, 'C7'],
-  ['FL Piano (17).wav', 2100.0, 'C7'],
-  ['FL Piano (18).wav', 36.78, 'D1'],
-  ['FL Piano (19).wav', 73.87, 'D2'],
-  ['FL Piano (20).wav', 147.49, 'D3'],
-  ['FL Piano (21).wav', 297.97, 'D4'],
-  ['FL Piano (22).wav', 595.95, 'D5'],
-  ['FL Piano (23).wav', 1191.89, 'D6'],
-  ['FL Piano (24).wav', 1191.89, 'D6'],
-  ['FL Piano (25).wav', 41.41, 'E1'],
-  ['FL Piano (26).wav', 83.05, 'E2'],
-  ['FL Piano (27).wav', 165.17, 'E3'],
-  ['FL Piano (28).wav', 334.09, 'E4'],
-  ['FL Piano (29).wav', 668.18, 'E5'],
-  ['FL Piano (30).wav', 1336.36, 'E6'],
-  ['FL Piano (31).wav', 1336.36, 'E6'],
-  ['FL Piano (32).wav', 46.47, 'F#1'],
-  ['FL Piano (33).wav', 92.65, 'F#2'],
-  ['FL Piano (34).wav', 186.08, 'F#3'],
-  ['FL Piano (35).wav', 370.59, 'F#4'],
-  ['FL Piano (36).wav', 760.34, 'F#5'],
-  ['FL Piano (37).wav', 1470.0, 'F#6'],
-  ['FL Piano (38).wav', 1470.0, 'F#6'],
-  ['FL Piano (39).wav', 52.07, 'G#1'],
-  ['FL Piano (40).wav', 104.5, 'G#2'],
-  ['FL Piano (41).wav', 210.0, 'G#3'],
-  ['FL Piano (42).wav', 416.04, 'G#4'],
-  ['FL Piano (43).wav', 848.08, 'G#5'],
-  ['FL Piano (44).wav', 1633.33, 'G#6'],
-  ['FL Piano (45).wav', 832.08, 'G#5'],
+  ['FL Piano (1).wav', 'A1'],
+  ['FL Piano (2).wav', 'A#1'],
+  ['FL Piano (10).wav', 'C2'],
+  ['FL Piano (18).wav', 'D2'],
+  ['FL Piano (25).wav', 'E2'],
+  ['FL Piano (32).wav', 'F#2'],
+  ['FL Piano (39).wav', 'G#2'],
+  ['FL Piano (3).wav', 'A#2'],
+  ['FL Piano (11).wav', 'C3'],
+  ['FL Piano (19).wav', 'D3'],
+  ['FL Piano (26).wav', 'E3'],
+  ['FL Piano (33).wav', 'F#3'],
+  ['FL Piano (40).wav', 'G#3'],
+  ['FL Piano (4).wav', 'A#3'],
+  ['FL Piano (12).wav', 'C4'],
+  ['FL Piano (20).wav', 'D4'],
+  ['FL Piano (27).wav', 'E4'],
+  ['FL Piano (34).wav', 'F#4'],
+  ['FL Piano (41).wav', 'G#4'],
+  ['FL Piano (5).wav', 'A#4'],
+  ['FL Piano (13).wav', 'C5'],
+  ['FL Piano (21).wav', 'D5'],
+  ['FL Piano (28).wav', 'E5'],
+  ['FL Piano (35).wav', 'F#5'],
+  ['FL Piano (42).wav', 'G#5'],
+  ['FL Piano (6).wav', 'A#5'],
+  ['FL Piano (14).wav', 'C6'],
+  ['FL Piano (22).wav', 'D6'],
+  ['FL Piano (29).wav', 'E6'],
+  ['FL Piano (36).wav', 'F#6'],
+  ['FL Piano (43).wav', 'G#6'],
+  ['FL Piano (7).wav', 'A#6'],
+  ['FL Piano (15).wav', 'C7'],
+  ['FL Piano (23).wav', 'D7'],
+  ['FL Piano (30).wav', 'E7'],
+  ['FL Piano (37).wav', 'F#7'],
+  ['FL Piano (44).wav', 'G#7'],
+  ['FL Piano (8).wav', 'A#7'],
+  ['FL Piano (16).wav', 'C8'],
+  ['FL Piano (24).wav', 'D8'],
+  ['FL Piano (31).wav', 'E8'],
+  ['FL Piano (38).wav', 'F#8'],
+  ['FL Piano (45).wav', 'G#8'],
+  ['FL Piano (9).wav', 'A#8'],
+  ['FL Piano (17).wav', 'C9'],
 ];
 
+export function getEqualTemperamentFrequency(noteLabel: string): number | null {
+  const normalized = noteLabel.trim().toUpperCase().replace('♯', '#').replace('＃', '#').replace('♭', 'B');
+  const match = normalized.match(/^([A-G](?:#|B)?)(-?\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const noteIndex = NOTE_INDEX[match[1]];
+  const octave = Number(match[2]);
+  if (noteIndex === undefined || !Number.isFinite(octave)) {
+    return null;
+  }
+
+  const midiNumber = (octave + 1) * 12 + noteIndex;
+  return 440 * Math.pow(2, (midiNumber - 69) / 12);
+}
+
+function getSampleBaseFrequency(noteLabel: string, explicitFrequency?: number): number {
+  if (explicitFrequency !== undefined && Number.isFinite(explicitFrequency) && explicitFrequency > 0) {
+    return explicitFrequency;
+  }
+  return getEqualTemperamentFrequency(noteLabel) ?? 440;
+}
+
 const DEFAULT_SAMPLE_MAP = new Map(
-  DEFAULT_PIANO_SAMPLE_ROWS.map(([fileName, baseFrequency, noteLabel]) => [fileName, {baseFrequency, noteLabel}]),
+  DEFAULT_PIANO_SAMPLE_ROWS.map(([fileName, noteLabel, baseFrequency]) => [
+    fileName,
+    {baseFrequency: getSampleBaseFrequency(noteLabel, baseFrequency), noteLabel},
+  ]),
 );
 
 function getNumericSampleOrder(fileName: string): number {
@@ -88,8 +137,8 @@ const SAMPLE_CATALOG: PianoSampleDefinition[] = Object.entries(sampleUrls)
       return null;
     }
 
-    const analyzed = DEFAULT_SAMPLE_MAP.get(fileName);
-    if (!analyzed) {
+    const sampleInfo = DEFAULT_SAMPLE_MAP.get(fileName);
+    if (!sampleInfo) {
       return null;
     }
 
@@ -97,9 +146,9 @@ const SAMPLE_CATALOG: PianoSampleDefinition[] = Object.entries(sampleUrls)
       id: fileName,
       fileName,
       url,
-      baseFrequency: analyzed.baseFrequency,
-      referenceFrequency: analyzed.baseFrequency,
-      noteLabel: analyzed.noteLabel,
+      baseFrequency: sampleInfo.baseFrequency,
+      referenceFrequency: sampleInfo.baseFrequency,
+      noteLabel: sampleInfo.noteLabel,
     };
   })
   .filter((sample): sample is PianoSampleDefinition => sample !== null)
@@ -152,41 +201,53 @@ export function findClosestPitchReferenceForFrequency(
   return nearest;
 }
 
+function getOverrideBaseFrequency(sample: PianoSampleDefinition, override?: PianoSampleOverrideMap[string]): {frequency: number; noteLabel: string} {
+  const noteLabel = override?.noteLabel?.trim() || sample.noteLabel;
+  return {
+    frequency: getSampleBaseFrequency(noteLabel, override?.baseFrequency),
+    noteLabel,
+  };
+}
+
 function resolveSampleDefinition(
   sample: PianoSampleDefinition,
   tuning: TuningPreset,
   overrides?: PianoSampleOverrideMap,
 ): PianoSampleDefinition {
   const override = overrides?.[sample.fileName];
+  const sampleBase = getOverrideBaseFrequency(sample, override);
 
   if (override?.pitchId !== undefined) {
     const resolved = getPitchFrequencyByReference(tuning, override.pitchId, override.octaveShift ?? 0);
     if (resolved) {
       return {
         ...sample,
+        baseFrequency: sampleBase.frequency,
         pitchId: override.pitchId,
         octaveShift: override.octaveShift ?? 0,
-        referenceFrequency: resolved.baseFrequency,
-        noteLabel: resolved.noteLabel,
+        referenceFrequency: sampleBase.frequency,
+        noteLabel: sampleBase.noteLabel,
       };
     }
   }
 
-  const guessed = findClosestPitchReferenceForFrequency(override?.baseFrequency ?? sample.baseFrequency, tuning);
+  const guessed = findClosestPitchReferenceForFrequency(sampleBase.frequency, tuning);
   if (guessed) {
     return {
       ...sample,
+      baseFrequency: sampleBase.frequency,
       pitchId: guessed.pitchId,
       octaveShift: guessed.octaveShift,
-      referenceFrequency: guessed.baseFrequency,
-      noteLabel: guessed.noteLabel,
+      referenceFrequency: sampleBase.frequency,
+      noteLabel: sampleBase.noteLabel,
     };
   }
 
   return {
     ...sample,
-    referenceFrequency: override?.baseFrequency ?? sample.baseFrequency,
-    noteLabel: override?.noteLabel ?? sample.noteLabel,
+    baseFrequency: sampleBase.frequency,
+    referenceFrequency: sampleBase.frequency,
+    noteLabel: sampleBase.noteLabel,
   };
 }
 
@@ -215,8 +276,8 @@ export function getDefaultPianoSampleOverrideMap(tuning: TuningPreset): PianoSam
       return [
         sample.fileName,
         guessed
-          ? {pitchId: guessed.pitchId, octaveShift: guessed.octaveShift}
-          : {baseFrequency: sample.baseFrequency, noteLabel: sample.noteLabel},
+          ? {pitchId: guessed.pitchId, octaveShift: guessed.octaveShift, noteLabel: sample.noteLabel}
+          : {noteLabel: sample.noteLabel},
       ];
     }),
   );

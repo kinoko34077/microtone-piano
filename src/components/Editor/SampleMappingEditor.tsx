@@ -2,10 +2,11 @@ import React, {useMemo} from 'react';
 import {RefreshCcw} from 'lucide-react';
 import {AppSettings, TuningPreset} from '../../types/keyboard';
 import {
+  findClosestPitchReferenceForFrequency,
   getDefaultPianoSampleOverrideMap,
+  getEqualTemperamentFrequency,
   getPianoSampleCatalog,
   PianoSampleOverrideMap,
-  findClosestPitchReferenceForFrequency,
 } from '../../core/pianoSamples';
 import {calculateFrequency, getFormattedPitchLabel} from '../../core/pitch';
 
@@ -33,14 +34,24 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
     });
   };
 
-  const updateSample = (fileName: string, patch: {pitchId?: number; octaveShift?: number}) => {
+  const updateSample = (
+    fileName: string,
+    patch: {pitchId?: number; octaveShift?: number; noteLabel?: string; baseFrequency?: number | null},
+  ) => {
     const current = overrides[fileName] ?? defaults[fileName] ?? {};
+    const nextEntry = {
+      ...current,
+      ...patch,
+      octaveShift: patch.octaveShift ?? current.octaveShift ?? 0,
+    };
+
+    if (patch.baseFrequency === null) {
+      delete nextEntry.baseFrequency;
+    }
+
     updateOverrides({
       ...overrides,
-      [fileName]: {
-        pitchId: patch.pitchId ?? current.pitchId,
-        octaveShift: patch.octaveShift ?? current.octaveShift ?? 0,
-      },
+      [fileName]: nextEntry,
     });
   };
 
@@ -50,11 +61,12 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
         <div>
           <h3 className="text-sm font-bold text-slate-100">外部音源マッピング</h3>
           <p className="mt-0.5 text-xs text-slate-400">
-            `Grand Piano/` 配下のサンプルに対して、基準 pitch ID とオクターブを対応づけます。
+            サンプル自体の基準は12平均律の音名で扱います。基準Hzが空なら、A0 や C4 などの音名から計算します。
           </p>
         </div>
 
         <button
+          type="button"
           onClick={() => updateOverrides({})}
           className="flex items-center gap-1 rounded border border-[#30363d] bg-[#21262d] px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-700"
         >
@@ -68,7 +80,10 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
           <thead>
             <tr className="border-b border-[#30363d] bg-[#0d1117] text-slate-300">
               <th className="p-2.5">ファイル</th>
-              <th className="p-2.5">基準 pitch ID</th>
+              <th className="p-2.5">音源の基準音</th>
+              <th className="p-2.5">基準Hz 任意</th>
+              <th className="p-2.5">音源基準Hz</th>
+              <th className="p-2.5">対応 pitch ID</th>
               <th className="p-2.5">オクターブ</th>
               <th className="p-2.5">対応音名</th>
               <th className="p-2.5">対応周波数</th>
@@ -78,18 +93,45 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
           <tbody>
             {catalog.map((sample) => {
               const fallback = defaults[sample.fileName] ?? {};
-              const current = overrides[sample.fileName] ?? fallback;
-              const fallbackGuess = findClosestPitchReferenceForFrequency(sample.baseFrequency, tuning);
+              const override = overrides[sample.fileName];
+              const current = override ?? fallback;
+              const noteLabel = current.noteLabel ?? sample.noteLabel;
+              const sourceFrequency = current.baseFrequency ?? getEqualTemperamentFrequency(noteLabel) ?? sample.baseFrequency;
+              const fallbackGuess = findClosestPitchReferenceForFrequency(sourceFrequency, tuning);
               const pitchId = current.pitchId ?? fallbackGuess?.pitchId ?? tuning.pitches[0]?.id ?? 0;
               const octaveShift = current.octaveShift ?? fallbackGuess?.octaveShift ?? 0;
               const pitchDef = tuning.pitches.find((pitch) => pitch.id === pitchId) ?? tuning.pitches[0];
               const resolvedLabel = pitchDef ? getFormattedPitchLabel(pitchDef, tuning, 'note', octaveShift) : '-';
               const resolvedFreq = pitchDef ? calculateFrequency(pitchDef, tuning, octaveShift) : 0;
-              const isOverridden = Boolean(overrides[sample.fileName]);
+              const isOverridden = Boolean(override);
 
               return (
                 <tr key={sample.fileName} className="border-b border-[#30363d]/60 hover:bg-[#0d1117]/40">
                   <td className="p-2.5 font-mono text-[11px] text-slate-200">{sample.fileName}</td>
+                  <td className="p-2.5">
+                    <input
+                      type="text"
+                      value={noteLabel}
+                      onChange={(event) => updateSample(sample.fileName, {noteLabel: event.target.value})}
+                      className="w-24 rounded border border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-500"
+                    />
+                  </td>
+                  <td className="p-2.5">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={current.baseFrequency ?? ''}
+                      placeholder="空なら音名"
+                      onChange={(event) =>
+                        updateSample(sample.fileName, {
+                          baseFrequency: event.target.value === '' ? null : Number(event.target.value),
+                        })
+                      }
+                      className="w-28 rounded border border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-500"
+                    />
+                  </td>
+                  <td className="p-2.5 font-mono text-slate-300">{sourceFrequency.toFixed(2)} Hz</td>
                   <td className="p-2.5">
                     <select
                       value={pitchId}
@@ -117,9 +159,12 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
                     </select>
                   </td>
                   <td className="p-2.5 font-mono text-slate-300">{resolvedLabel}</td>
-                  <td className="p-2.5 font-mono text-slate-400">{resolvedFreq > 0 ? `${resolvedFreq.toFixed(2)} Hz` : '-'}</td>
+                  <td className="p-2.5 font-mono text-slate-400">
+                    {resolvedFreq > 0 ? `${resolvedFreq.toFixed(2)} Hz` : '-'}
+                  </td>
                   <td className="p-2.5 text-right">
                     <button
+                      type="button"
                       onClick={() => {
                         const next = {...overrides};
                         delete next[sample.fileName];

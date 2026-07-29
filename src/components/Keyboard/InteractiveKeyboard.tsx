@@ -20,6 +20,7 @@ type PointerPressState = {
   address: number;
   token: number;
   voiceId?: string;
+  cancelled?: boolean;
 };
 
 type SegmentRenderInfo = {
@@ -42,7 +43,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const pressTokenRef = useRef(0);
   const scrollRafRef = useRef<number | null>(null);
-  const [pressedPointers, setPressedPointers] = useState<Map<string, PointerPressState>>(new Map());
+  const pressedPointersRef = useRef<Map<string, PointerPressState>>(new Map());
+  const [pressedAddresses, setPressedAddresses] = useState<Set<number>>(new Set());
   const [viewportWidth, setViewportWidth] = useState(0);
   const columnRange = useMemo(() => getKeyboardColumnRange(layout, tuning, 0), [layout, tuning]);
   const {period, startRepeat, totalColumns} = columnRange;
@@ -53,9 +55,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
   const heldAddressSet = useMemo(() => {
     const set = new Set<number>(externalPressedAddresses ?? []);
-    pressedPointers.forEach(({address}) => set.add(address));
+    pressedAddresses.forEach((address) => set.add(address));
     return set;
-  }, [externalPressedAddresses, pressedPointers]);
+  }, [externalPressedAddresses, pressedAddresses]);
 
   const visibleColumnRange = useMemo(() => {
     const keyWidth = settings.keyWidth;
@@ -162,36 +164,51 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       }
 
       const token = ++pressTokenRef.current;
-      setPressedPointers((prev) => new Map(prev).set(pointerKey, {address, token}));
+      pressedPointersRef.current.set(pointerKey, {address, token});
+      setPressedAddresses((prev) => {
+        if (prev.has(address)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.add(address);
+        return next;
+      });
 
       const frequency = calculateFrequency(pitchDef, tuning, tuningOctaveShift + octOffset);
       const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, velocity, pointerKey);
 
-      setPressedPointers((prev) => {
-        const current = prev.get(pointerKey);
-        if (!current || current.token !== token) {
-          globalAudioEngine.noteOff(voiceId);
-          return prev;
+      const current = pressedPointersRef.current.get(pointerKey);
+      if (!current || current.token !== token || current.cancelled) {
+        globalAudioEngine.noteOff(voiceId);
+        if (current?.token === token) {
+          pressedPointersRef.current.delete(pointerKey);
         }
-        const next = new Map(prev);
-        next.set(pointerKey, {...current, voiceId});
-        return next;
-      });
+        return;
+      }
+      pressedPointersRef.current.set(pointerKey, {...current, voiceId});
     },
     [layout, period, startRepeat, tuning],
   );
 
   const triggerNoteOff = useCallback((pointerKey: string) => {
-    setPressedPointers((prev) => {
-      const current = prev.get(pointerKey);
-      if (!current) {
+    const current = pressedPointersRef.current.get(pointerKey);
+    if (!current) {
+      return;
+    }
+
+    if (current.voiceId) {
+      globalAudioEngine.noteOff(current.voiceId);
+      pressedPointersRef.current.delete(pointerKey);
+    } else {
+      pressedPointersRef.current.set(pointerKey, {...current, cancelled: true});
+    }
+
+    setPressedAddresses((prev) => {
+      if (!prev.has(current.address)) {
         return prev;
       }
-      if (current.voiceId) {
-        globalAudioEngine.noteOff(current.voiceId);
-      }
-      const next = new Map(prev);
-      next.delete(pointerKey);
+      const next = new Set(prev);
+      next.delete(current.address);
       return next;
     });
   }, []);
@@ -212,7 +229,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     }
 
     const pointerKey = `pointer_${event.pointerId}`;
-    const currentItem = pressedPointers.get(pointerKey);
+    const currentItem = pressedPointersRef.current.get(pointerKey);
     const newAddress = getAddressFromCoordinates(event.clientX, event.clientY);
 
     if (newAddress !== null) {
@@ -299,7 +316,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`white_${x}_depth_${depth}`}
-              className={`relative flex flex-col justify-between border-b border-slate-200 p-1 transition-colors ${
+              className={`relative flex flex-col justify-end border-b border-slate-200 p-1 transition-colors ${
                 isPressed
                   ? 'bg-gradient-to-b from-amber-300 to-amber-400 text-amber-950 shadow-inner'
                   : isInvalid
@@ -309,7 +326,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
               style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
             >
               {settings.showAddressBinary && (
-                <div className="flex items-center justify-between text-[8px] font-mono opacity-50">
+                <div className="absolute left-1 right-1 top-1 flex items-center justify-between text-[8px] font-mono opacity-50">
                   <span>d{depth}</span>
                   <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>
                 </div>
@@ -368,7 +385,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`black_${x}_depth_${depth}`}
-              className={`relative flex flex-col justify-between border-b border-slate-800 p-0.5 transition-colors ${
+              className={`relative flex flex-col justify-end border-b border-slate-800 p-0.5 transition-colors ${
                 isPressed
                   ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-inner'
                   : isInvalid
@@ -378,7 +395,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
               style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
             >
               {settings.showAddressBinary && (
-                <div className="flex items-center justify-between text-[7px] font-mono opacity-40">
+                <div className="absolute left-0.5 right-0.5 top-0.5 flex items-center justify-between text-[7px] font-mono opacity-40">
                   <span>d{depth}</span>
                   <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>
                 </div>
