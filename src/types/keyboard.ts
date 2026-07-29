@@ -50,6 +50,8 @@ export interface LayoutPreset {
   mapping: number[];
   slotFlags?: boolean[];
   boundaryTemplates: Record<number, number[]>;
+  whiteBoundaryTemplates?: Record<number, number[]>;
+  blackBoundaryTemplates?: Record<number, number[]>;
   invalidSectionMode: InvalidSectionMode;
 }
 
@@ -59,7 +61,7 @@ export interface AppSettings {
   soundSource: 'piano' | 'sawtooth' | 'square';
   masterVolume: number;
   noteDecayMs?: number;
-  pianoSampleOverrides?: Record<string, {baseFrequency: number; noteLabel: string}>;
+  pianoSampleOverrides?: Record<string, {pitchId?: number; octaveShift?: number; baseFrequency?: number; noteLabel?: string}>;
   sustainLatch: boolean;
   sustainMomentary?: boolean;
   keyWidth: number;

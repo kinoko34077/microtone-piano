@@ -555,7 +555,7 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
         )}
 
         {activeTab === 'samples' && (
-          <SampleMappingEditor settings={settings} onUpdateSettings={onUpdateSettings} />
+          <SampleMappingEditor tuning={tuning} settings={settings} onUpdateSettings={onUpdateSettings} />
         )}
       </div>
     </div>

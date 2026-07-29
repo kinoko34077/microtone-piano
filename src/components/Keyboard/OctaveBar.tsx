@@ -10,9 +10,10 @@ interface OctaveBarProps {
   maxScrollOffset: number;
   keyWidth: number;
   onChangeKeyWidth: (width: number) => void;
+  actions?: React.ReactNode;
 }
 
-const SCROLL_STEP = 0.25;
+const SCROLL_STEP = 1;
 
 export const OctaveBar: React.FC<OctaveBarProps> = ({
   label,
@@ -23,12 +24,13 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
   maxScrollOffset,
   keyWidth,
   onChangeKeyWidth,
+  actions,
 }) => {
   const clampedScroll = Math.max(0, Math.min(maxScrollOffset, scrollOffset));
 
   return (
-    <div className="flex select-none flex-wrap items-center justify-between gap-2 border-b border-[#30363d] bg-[#0d1117] px-2 py-1 pr-[8.5rem] text-xs md:pr-2">
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex select-none items-center justify-between gap-2 border-b border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {label && <span className="mr-1 text-[11px] font-bold text-sky-400">{label}</span>}
 
         <span className="text-[10px] font-medium text-slate-400">オクターブ</span>
@@ -49,35 +51,33 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
         >
           <ChevronRight className="h-3.5 w-3.5" />
         </button>
-      </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10px] font-medium text-slate-400">表示位置</span>
+        <span className="ml-1 text-[10px] font-medium text-slate-400">表示位置</span>
         <button
           onClick={() => onChangeScrollOffset(clampedScroll - SCROLL_STEP)}
           className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
-          title="少し左へ"
+          title="左へ1つ"
         >
-          -0.25
+          -1
         </button>
         <input
           type="range"
           min="0"
           max={Math.max(0, maxScrollOffset)}
           step={SCROLL_STEP}
-          value={clampedScroll}
+          value={Math.round(clampedScroll)}
           onChange={(event) => onChangeScrollOffset(Number(event.target.value))}
-          className="h-1 w-28 cursor-pointer appearance-none rounded bg-[#30363d] accent-emerald-500"
+          className="h-1 w-24 min-w-0 flex-1 cursor-pointer appearance-none rounded bg-[#30363d] accent-emerald-500"
         />
         <button
           onClick={() => onChangeScrollOffset(clampedScroll + SCROLL_STEP)}
           className="rounded border border-[#30363d] bg-[#21262d] px-1.5 py-1 text-[10px] text-slate-200 transition-colors hover:bg-slate-700"
-          title="少し右へ"
+          title="右へ1つ"
         >
-          +0.25
+          +1
         </button>
-        <div className="flex min-w-[60px] items-center justify-center rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5 font-mono font-bold text-emerald-300">
-          {clampedScroll.toFixed(2)}
+        <div className="flex min-w-[48px] items-center justify-center rounded border border-[#30363d] bg-[#161b22] px-2 py-0.5 font-mono font-bold text-emerald-300">
+          {Math.round(clampedScroll)}
         </div>
 
         <span className="hidden text-[10px] font-medium text-slate-400 sm:inline">鍵盤幅</span>
@@ -95,7 +95,7 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
             max="120"
             value={keyWidth}
             onChange={(event) => onChangeKeyWidth(Number(event.target.value))}
-            className="h-1 w-16 cursor-pointer appearance-none rounded bg-[#30363d] accent-sky-500"
+            className="h-1 w-14 cursor-pointer appearance-none rounded bg-[#30363d] accent-sky-500"
           />
           <button
             onClick={() => onChangeKeyWidth(Math.min(120, keyWidth + 4))}
@@ -107,6 +107,8 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
           <span className="w-8 text-right text-[10px] font-bold text-sky-400">{keyWidth}px</span>
         </div>
       </div>
+
+      {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
     </div>
   );
 };

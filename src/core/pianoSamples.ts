@@ -1,3 +1,6 @@
+import {TuningPreset} from '../types/keyboard';
+import {calculateFrequency, encodePitchReference, getFormattedPitchLabel, resolvePitch} from './pitch';
+
 export type PianoSampleRow = [fileName: string, baseFrequency: number, noteLabel: string];
 
 export interface PianoSampleDefinition {
@@ -6,9 +9,14 @@ export interface PianoSampleDefinition {
   url: string;
   baseFrequency: number;
   noteLabel: string;
+  pitchId?: number;
+  octaveShift?: number;
 }
 
-export type PianoSampleOverrideMap = Record<string, {baseFrequency: number; noteLabel: string}>;
+export type PianoSampleOverrideMap = Record<string, {pitchId?: number; octaveShift?: number; baseFrequency?: number; noteLabel?: string}>;
+
+const DEFAULT_OCTAVE_SEARCH_MIN = -8;
+const DEFAULT_OCTAVE_SEARCH_MAX = 8;
 
 const sampleUrls = import.meta.glob('../../Grand Piano/*.wav', {
   eager: true,
@@ -97,21 +105,97 @@ const SAMPLE_CATALOG: PianoSampleDefinition[] = Object.entries(sampleUrls)
 
 let activePianoSamples: PianoSampleDefinition[] = SAMPLE_CATALOG.map((sample) => ({...sample}));
 
-export function buildPianoSamples(overrides?: PianoSampleOverrideMap): PianoSampleDefinition[] {
-  return SAMPLE_CATALOG
-    .map((sample) => {
-      const override = overrides?.[sample.fileName];
+function getPitchFrequencyByReference(tuning: TuningPreset, pitchId: number, octaveShift: number): {baseFrequency: number; noteLabel: string} | null {
+  const {pitchDef, octaveShift: resolvedShift} = resolvePitch(encodePitchReference(pitchId, octaveShift), tuning);
+  if (!pitchDef) {
+    return null;
+  }
+
+  return {
+    baseFrequency: calculateFrequency(pitchDef, tuning, resolvedShift),
+    noteLabel: getFormattedPitchLabel(pitchDef, tuning, 'note', resolvedShift),
+  };
+}
+
+export function findClosestPitchReferenceForFrequency(
+  targetFrequency: number,
+  tuning: TuningPreset,
+): {pitchId: number; octaveShift: number; baseFrequency: number; noteLabel: string} | null {
+  if (!Number.isFinite(targetFrequency) || targetFrequency <= 0 || tuning.pitches.length === 0) {
+    return null;
+  }
+
+  let nearest: {pitchId: number; octaveShift: number; baseFrequency: number; noteLabel: string} | null = null;
+  let nearestDistance = Infinity;
+
+  for (const pitch of tuning.pitches) {
+    for (let octaveShift = DEFAULT_OCTAVE_SEARCH_MIN; octaveShift <= DEFAULT_OCTAVE_SEARCH_MAX; octaveShift += 1) {
+      const resolved = getPitchFrequencyByReference(tuning, pitch.id, octaveShift);
+      if (!resolved || resolved.baseFrequency <= 0) {
+        continue;
+      }
+      const distance = Math.abs(Math.log2(targetFrequency / resolved.baseFrequency));
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = {
+          pitchId: pitch.id,
+          octaveShift,
+          baseFrequency: resolved.baseFrequency,
+          noteLabel: resolved.noteLabel,
+        };
+      }
+    }
+  }
+
+  return nearest;
+}
+
+function resolveSampleDefinition(
+  sample: PianoSampleDefinition,
+  tuning: TuningPreset,
+  overrides?: PianoSampleOverrideMap,
+): PianoSampleDefinition {
+  const override = overrides?.[sample.fileName];
+
+  if (override?.pitchId !== undefined) {
+    const resolved = getPitchFrequencyByReference(tuning, override.pitchId, override.octaveShift ?? 0);
+    if (resolved) {
       return {
         ...sample,
-        baseFrequency: override?.baseFrequency ?? sample.baseFrequency,
-        noteLabel: override?.noteLabel ?? sample.noteLabel,
+        pitchId: override.pitchId,
+        octaveShift: override.octaveShift ?? 0,
+        baseFrequency: resolved.baseFrequency,
+        noteLabel: resolved.noteLabel,
       };
-    })
+    }
+  }
+
+  const guessed = findClosestPitchReferenceForFrequency(override?.baseFrequency ?? sample.baseFrequency, tuning);
+  if (guessed) {
+    return {
+      ...sample,
+      pitchId: guessed.pitchId,
+      octaveShift: guessed.octaveShift,
+      baseFrequency: guessed.baseFrequency,
+      noteLabel: guessed.noteLabel,
+    };
+  }
+
+  return {
+    ...sample,
+    baseFrequency: override?.baseFrequency ?? sample.baseFrequency,
+    noteLabel: override?.noteLabel ?? sample.noteLabel,
+  };
+}
+
+export function buildPianoSamples(tuning: TuningPreset, overrides?: PianoSampleOverrideMap): PianoSampleDefinition[] {
+  return SAMPLE_CATALOG
+    .map((sample) => resolveSampleDefinition(sample, tuning, overrides))
     .sort((a, b) => a.baseFrequency - b.baseFrequency);
 }
 
-export function setPianoSampleOverrides(overrides?: PianoSampleOverrideMap) {
-  activePianoSamples = buildPianoSamples(overrides);
+export function setPianoSampleOverrides(tuning: TuningPreset, overrides?: PianoSampleOverrideMap) {
+  activePianoSamples = buildPianoSamples(tuning, overrides);
 }
 
 export function getPianoSampleCatalog(): PianoSampleDefinition[] {
@@ -122,12 +206,17 @@ export function getActivePianoSamples(): PianoSampleDefinition[] {
   return activePianoSamples.map((sample) => ({...sample}));
 }
 
-export function getDefaultPianoSampleOverrideMap(): PianoSampleOverrideMap {
+export function getDefaultPianoSampleOverrideMap(tuning: TuningPreset): PianoSampleOverrideMap {
   return Object.fromEntries(
-    DEFAULT_PIANO_SAMPLE_ROWS.map(([fileName, baseFrequency, noteLabel]) => [
-      fileName,
-      {baseFrequency, noteLabel},
-    ]),
+    SAMPLE_CATALOG.map((sample) => {
+      const guessed = findClosestPitchReferenceForFrequency(sample.baseFrequency, tuning);
+      return [
+        sample.fileName,
+        guessed
+          ? {pitchId: guessed.pitchId, octaveShift: guessed.octaveShift}
+          : {baseFrequency: sample.baseFrequency, noteLabel: sample.noteLabel},
+      ];
+    }),
   );
 }
 

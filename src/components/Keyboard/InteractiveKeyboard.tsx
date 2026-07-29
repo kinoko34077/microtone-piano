@@ -28,7 +28,7 @@ type SegmentRenderInfo = {
   isInvalid: boolean;
 };
 
-const OVERSCAN_COLUMNS = 2;
+const OVERSCAN_COLUMNS = 1;
 
 export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   layout,
@@ -41,6 +41,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pressTokenRef = useRef(0);
+  const scrollRafRef = useRef<number | null>(null);
   const [pressedPointers, setPressedPointers] = useState<Map<string, PointerPressState>>(new Map());
   const [viewportWidth, setViewportWidth] = useState(0);
   const columnRange = useMemo(() => getKeyboardColumnRange(layout, tuning, octaveShift), [layout, tuning, octaveShift]);
@@ -108,7 +109,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
               calculateDepthFromRatio(
                 relY / blackHeight,
                 activeDepths,
-                lane ? getLaneBoundaries(layout, lane) : [0, 1],
+                lane ? getLaneBoundaries(layout, lane, true) : [0, 1],
                 settings.showInvalidSections,
               ),
             );
@@ -126,7 +127,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           calculateDepthFromRatio(
             relY / totalHeight,
             activeDepths,
-            lane ? getLaneBoundaries(layout, lane) : [0, 1],
+            lane ? getLaneBoundaries(layout, lane, false) : [0, 1],
             settings.showInvalidSections,
           ),
         );
@@ -247,7 +248,16 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     if (!containerRef.current || !onChangeScrollOffsetColumns) {
       return;
     }
-    onChangeScrollOffsetColumns(containerRef.current.scrollLeft / settings.keyWidth);
+    if (scrollRafRef.current !== null) {
+      return;
+    }
+    scrollRafRef.current = window.requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      if (!containerRef.current) {
+        return;
+      }
+      onChangeScrollOffsetColumns(containerRef.current.scrollLeft / settings.keyWidth);
+    });
   }, [onChangeScrollOffsetColumns, settings.keyWidth]);
 
   const renderWhiteKey = (x: number) => {
@@ -255,7 +265,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     const activeDepths = lane?.activeDepths ?? 0;
     const octOffset = startRepeat + Math.floor(x / period);
     const baseX = x % period;
-    const segments = getRenderedSegments(activeDepths, lane, layout, settings.showInvalidSections);
+    const segments = getRenderedSegments(activeDepths, lane, layout, false, settings.showInvalidSections);
 
     return (
       <div
@@ -274,18 +284,6 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             ? getFormattedPitchLabel(pitchDef, tuning, settings.pitchLabelMode, totalOctaveShift)
             : '';
 
-          const stepVal = pitchDef?.step ?? 0;
-          const edoVal = pitchDef?.edo ?? 12;
-          const octVal = Math.floor((stepVal + totalOctaveShift * edoVal) / edoVal) + 4;
-          const badgeBg =
-            octVal <= 3
-              ? 'bg-amber-300 text-amber-950 border-amber-400'
-              : octVal === 4
-                ? 'bg-emerald-300 text-emerald-950 border-emerald-400'
-                : octVal === 5
-                  ? 'bg-sky-300 text-sky-950 border-sky-400'
-                  : 'bg-indigo-300 text-indigo-950 border-indigo-400';
-
           return (
             <div
               key={`white_${x}_depth_${depth}`}
@@ -298,14 +296,16 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
               }`}
               style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
             >
-              <div className="flex items-center justify-between text-[8px] font-mono opacity-50">
-                <span>d{depth}</span>
-                {settings.showAddressBinary && <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>}
-              </div>
+              {settings.showAddressBinary && (
+                <div className="flex items-center justify-between text-[8px] font-mono opacity-50">
+                  <span>d{depth}</span>
+                  <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>
+                </div>
+              )}
 
               <div className="mb-1 flex justify-center">
                 {formattedLabel && (
-                  <span className={`rounded border px-1.5 py-0.5 text-[11px] font-extrabold leading-none tracking-tight shadow-sm ${badgeBg}`}>
+                  <span className="px-1 text-[10px] font-medium leading-none tracking-tight text-slate-500">
                     {formattedLabel}
                   </span>
                 )}
@@ -330,7 +330,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     const blackWidth = settings.keyWidth * settings.blackKeyWidthRatio;
     const center = (x + 1) * settings.keyWidth;
     const blackLeft = center - blackWidth / 2;
-    const segments = getRenderedSegments(activeDepths, lane, layout, settings.showInvalidSections);
+    const segments = getRenderedSegments(activeDepths, lane, layout, true, settings.showInvalidSections);
 
     return (
       <div
@@ -365,14 +365,16 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
               }`}
               style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
             >
-              <div className="flex items-center justify-between text-[7px] font-mono opacity-40">
-                <span>d{depth}</span>
-                {settings.showAddressBinary && <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>}
-              </div>
+              {settings.showAddressBinary && (
+                <div className="flex items-center justify-between text-[7px] font-mono opacity-40">
+                  <span>d{depth}</span>
+                  <span>{`0x${address.toString(16).padStart(2, '0').toUpperCase()}`}</span>
+                </div>
+              )}
 
               <div className="mb-0.5 flex justify-center">
                 {formattedLabel && (
-                  <span className="rounded border border-slate-700 bg-slate-800 px-1 py-[1px] text-[9px] font-extrabold text-amber-300">
+                  <span className="px-1 text-[9px] font-medium text-slate-500">
                     {formattedLabel}
                   </span>
                 )}
@@ -435,6 +437,7 @@ function getRenderedSegments(
   activeDepths: number,
   lane: LaneConfig | undefined,
   layout: LayoutPreset,
+  isBlack: boolean,
   showInvalidSections: boolean,
 ): SegmentRenderInfo[] {
   if (showInvalidSections) {
@@ -449,7 +452,7 @@ function getRenderedSegments(
     return [];
   }
 
-  const heights = getSegmentHeightsFromBoundaries(getLaneBoundaries(layout, lane));
+  const heights = getSegmentHeightsFromBoundaries(getLaneBoundaries(layout, lane, isBlack));
   return Array.from({length: activeDepths}, (_, index) => ({
     depth: activeDepths - 1 - index,
     heightPercent: heights[index] * 100,

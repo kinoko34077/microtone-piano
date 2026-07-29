@@ -1,24 +1,29 @@
 import React, {useMemo} from 'react';
 import {RefreshCcw} from 'lucide-react';
-import {AppSettings} from '../../types/keyboard';
+import {AppSettings, TuningPreset} from '../../types/keyboard';
 import {
   getDefaultPianoSampleOverrideMap,
   getPianoSampleCatalog,
   PianoSampleOverrideMap,
+  findClosestPitchReferenceForFrequency,
 } from '../../core/pianoSamples';
-import {BlurCommitNumberInput} from '../BlurCommitNumberInput';
+import {calculateFrequency, getFormattedPitchLabel} from '../../core/pitch';
 
 interface SampleMappingEditorProps {
+  tuning: TuningPreset;
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
 }
 
+const OCTAVE_OPTIONS = Array.from({length: 17}, (_, index) => index - 8);
+
 export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
+  tuning,
   settings,
   onUpdateSettings,
 }) => {
   const catalog = useMemo(() => getPianoSampleCatalog(), []);
-  const defaults = useMemo(() => getDefaultPianoSampleOverrideMap(), []);
+  const defaults = useMemo(() => getDefaultPianoSampleOverrideMap(tuning), [tuning]);
   const overrides = settings.pianoSampleOverrides ?? {};
 
   const updateOverrides = (nextOverrides: PianoSampleOverrideMap) => {
@@ -28,13 +33,13 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
     });
   };
 
-  const updateSample = (fileName: string, patch: {baseFrequency?: number; noteLabel?: string}) => {
-    const current = overrides[fileName] ?? defaults[fileName];
+  const updateSample = (fileName: string, patch: {pitchId?: number; octaveShift?: number}) => {
+    const current = overrides[fileName] ?? defaults[fileName] ?? {};
     updateOverrides({
       ...overrides,
       [fileName]: {
-        baseFrequency: patch.baseFrequency ?? current.baseFrequency,
-        noteLabel: patch.noteLabel ?? current.noteLabel,
+        pitchId: patch.pitchId ?? current.pitchId,
+        octaveShift: patch.octaveShift ?? current.octaveShift ?? 0,
       },
     });
   };
@@ -45,7 +50,7 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
         <div>
           <h3 className="text-sm font-bold text-slate-100">外部音源マッピング</h3>
           <p className="mt-0.5 text-xs text-slate-400">
-            `Grand Piano/` 内の wav を、どの音名・基準周波数として扱うかを編集します。
+            `Grand Piano/` 内の各サンプルに、現在の音高IDとオクターブを対応づけます。
           </p>
         </div>
 
@@ -54,7 +59,7 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
           className="flex items-center gap-1 rounded border border-[#30363d] bg-[#21262d] px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:bg-slate-700"
         >
           <RefreshCcw className="h-3.5 w-3.5" />
-          全件を既定値に戻す
+          既定に戻す
         </button>
       </div>
 
@@ -63,36 +68,56 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
           <thead>
             <tr className="border-b border-[#30363d] bg-[#0d1117] text-slate-300">
               <th className="p-2.5">ファイル</th>
-              <th className="p-2.5">音名</th>
-              <th className="p-2.5">基準周波数 (Hz)</th>
+              <th className="p-2.5">音高ID</th>
+              <th className="p-2.5">オクターブ</th>
+              <th className="p-2.5">対応音名</th>
+              <th className="p-2.5">推定周波数</th>
               <th className="p-2.5 text-right">操作</th>
             </tr>
           </thead>
           <tbody>
             {catalog.map((sample) => {
-              const current = overrides[sample.fileName] ?? defaults[sample.fileName];
+              const fallback = defaults[sample.fileName] ?? {};
+              const current = overrides[sample.fileName] ?? fallback;
+              const fallbackGuess = findClosestPitchReferenceForFrequency(sample.baseFrequency, tuning);
+              const pitchId = current.pitchId ?? fallbackGuess?.pitchId ?? tuning.pitches[0]?.id ?? 0;
+              const octaveShift = current.octaveShift ?? fallbackGuess?.octaveShift ?? 0;
+              const pitchDef = tuning.pitches.find((pitch) => pitch.id === pitchId) ?? tuning.pitches[0];
+              const resolvedLabel = pitchDef ? getFormattedPitchLabel(pitchDef, tuning, 'note', octaveShift) : '-';
+              const resolvedFreq = pitchDef ? calculateFrequency(pitchDef, tuning, octaveShift) : 0;
               const isOverridden = Boolean(overrides[sample.fileName]);
 
               return (
                 <tr key={sample.fileName} className="border-b border-[#30363d]/60 hover:bg-[#0d1117]/40">
                   <td className="p-2.5 font-mono text-[11px] text-slate-200">{sample.fileName}</td>
                   <td className="p-2.5">
-                    <input
-                      type="text"
-                      value={current.noteLabel}
-                      onChange={(event) => updateSample(sample.fileName, {noteLabel: event.target.value})}
-                      className="w-24 rounded border border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-500"
-                    />
+                    <select
+                      value={pitchId}
+                      onChange={(event) => updateSample(sample.fileName, {pitchId: Number(event.target.value)})}
+                      className="w-44 rounded border border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-500"
+                    >
+                      {tuning.pitches.map((pitch) => (
+                        <option key={pitch.id} value={pitch.id}>
+                          ID {pitch.id} / {pitch.name}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="p-2.5">
-                    <BlurCommitNumberInput
-                      value={current.baseFrequency}
-                      step="0.01"
-                      min={0.01}
-                      onCommit={(value) => updateSample(sample.fileName, {baseFrequency: Math.max(0.01, value)})}
-                      className="w-28 rounded border border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs font-mono text-slate-200 outline-none focus:border-sky-500"
-                    />
+                    <select
+                      value={octaveShift}
+                      onChange={(event) => updateSample(sample.fileName, {octaveShift: Number(event.target.value)})}
+                      className="w-24 rounded border border-[#30363d] bg-[#0d1117] px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-500"
+                    >
+                      {OCTAVE_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {value >= 0 ? `+${value}` : value}
+                        </option>
+                      ))}
+                    </select>
                   </td>
+                  <td className="p-2.5 font-mono text-slate-300">{resolvedLabel}</td>
+                  <td className="p-2.5 font-mono text-slate-400">{resolvedFreq > 0 ? `${resolvedFreq.toFixed(2)} Hz` : '-'}</td>
                   <td className="p-2.5 text-right">
                     <button
                       onClick={() => {
@@ -107,7 +132,7 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
                           : 'cursor-not-allowed border-[#30363d] bg-[#161b22] text-slate-500'
                       }`}
                     >
-                      この行を戻す
+                      個別設定を解除
                     </button>
                   </td>
                 </tr>

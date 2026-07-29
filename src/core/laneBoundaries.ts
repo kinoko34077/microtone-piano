@@ -7,6 +7,13 @@ function createEvenBoundaries(activeDepths: number): number[] {
   return Array.from({length: activeDepths + 1}, (_, index) => index / activeDepths);
 }
 
+function getTemplateMap(layout: LayoutPreset, isBlack: boolean): Record<number, number[]> {
+  if (isBlack) {
+    return layout.blackBoundaryTemplates ?? layout.boundaryTemplates ?? {};
+  }
+  return layout.whiteBoundaryTemplates ?? layout.boundaryTemplates ?? {};
+}
+
 export function sanitizeBoundaries(boundaries: number[], activeDepths: number): number[] {
   if (activeDepths <= 0) {
     return [0, 1];
@@ -32,7 +39,25 @@ export function sanitizeBoundaries(boundaries: number[], activeDepths: number): 
   return next;
 }
 
-export function getLaneBoundaries(layout: LayoutPreset, lane: LaneConfig | undefined): number[] {
+export function getTemplateBoundaries(layout: LayoutPreset, activeDepths: number, isBlack: boolean): number[] {
+  if (activeDepths <= 0) {
+    return [0, 1];
+  }
+
+  const template = getTemplateMap(layout, isBlack)?.[activeDepths];
+  if (template?.length === activeDepths + 1) {
+    return sanitizeBoundaries(template, activeDepths);
+  }
+
+  const legacyTemplate = layout.boundaryTemplates?.[activeDepths];
+  if (legacyTemplate?.length === activeDepths + 1) {
+    return sanitizeBoundaries(legacyTemplate, activeDepths);
+  }
+
+  return createEvenBoundaries(activeDepths);
+}
+
+export function getLaneBoundaries(layout: LayoutPreset, lane: LaneConfig | undefined, isBlack: boolean = false): number[] {
   const activeDepths = lane?.activeDepths ?? 0;
   if (activeDepths <= 0) {
     return [0, 1];
@@ -42,12 +67,7 @@ export function getLaneBoundaries(layout: LayoutPreset, lane: LaneConfig | undef
     return sanitizeBoundaries(lane.customBoundaries, activeDepths);
   }
 
-  const template = layout.boundaryTemplates?.[activeDepths];
-  if (template?.length === activeDepths + 1) {
-    return sanitizeBoundaries(template, activeDepths);
-  }
-
-  return createEvenBoundaries(activeDepths);
+  return getTemplateBoundaries(layout, activeDepths, isBlack);
 }
 
 export function getSegmentHeightsFromBoundaries(boundaries: number[]): number[] {

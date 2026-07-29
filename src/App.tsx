@@ -26,7 +26,7 @@ type PressedPcKey = {
 const MAX_OCTAVE_OFFSET = 5;
 
 function clampOctaveOffset(value: number): number {
-  return Math.min(MAX_OCTAVE_OFFSET, value);
+  return Math.max(-MAX_OCTAVE_OFFSET, Math.min(MAX_OCTAVE_OFFSET, value));
 }
 
 function clampScrollOffset(value: number | undefined): number {
@@ -62,6 +62,7 @@ export default function App() {
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
   const [settingsReady, setSettingsReady] = useState(false);
   const saveTimerRef = useRef<number | null>(null);
+
   const upperColumnRange = useMemo(
     () => getKeyboardColumnRange(currentLayout, currentTuning, settings.upperOctaveOffset ?? 1),
     [currentLayout, currentTuning, settings.upperOctaveOffset],
@@ -77,16 +78,19 @@ export default function App() {
       const tunings = await storageService.getAllTuningPresets();
       const rawSettings = await storageService.getSettings();
       const loadedSettings = normalizeSettings(rawSettings);
+      const initialTuning =
+        tunings.find((tuning) => tuning.id === loadedSettings.defaultPitchPresetId) ?? STANDARD_TUNING_12EDO;
 
       setAllLayouts(layouts);
       setAllTunings(tunings);
+      setCurrentTuning(initialTuning);
       setSettings(loadedSettings);
 
       globalAudioEngine.setSoundSource(loadedSettings.soundSource);
       globalAudioEngine.setMasterVolume(loadedSettings.masterVolume);
       globalAudioEngine.setNoteDecayMs(loadedSettings.noteDecayMs ?? 0);
       globalAudioEngine.setSustain(loadedSettings.sustainLatch);
-      setPianoSampleOverrides(loadedSettings.pianoSampleOverrides);
+      setPianoSampleOverrides(initialTuning, loadedSettings.pianoSampleOverrides);
       setSettingsReady(true);
 
       if (JSON.stringify(loadedSettings) !== JSON.stringify(rawSettings)) {
@@ -139,10 +143,12 @@ export default function App() {
   }, [lowerColumnRange.maxScrollOffset, settings.lowerScrollOffset, settings.upperScrollOffset, upperColumnRange.maxScrollOffset]);
 
   const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
-    const normalized = normalizeSettings(newSettings);
-    setSettings(normalized);
-    setPianoSampleOverrides(normalized.pianoSampleOverrides);
+    setSettings(normalizeSettings(newSettings));
   }, []);
+
+  useEffect(() => {
+    setPianoSampleOverrides(currentTuning, settings.pianoSampleOverrides);
+  }, [currentTuning, settings.pianoSampleOverrides]);
 
   const handleToggleSustainLatch = useCallback(() => {
     const next = !settings.sustainLatch;
@@ -353,39 +359,21 @@ export default function App() {
     pcPressedMap.forEach(({address}) => next.add(address));
     return next;
   }, [pcPressedMap]);
+
   const upperScrollOffset = Math.min(settings.upperScrollOffset ?? 0, upperColumnRange.maxScrollOffset);
   const lowerScrollOffset = Math.min(settings.lowerScrollOffset ?? 0, lowerColumnRange.maxScrollOffset);
 
+  const headerActions = (
+    <HeaderActions
+      sustainLatch={settings.sustainLatch}
+      onToggleSustainLatch={handleToggleSustainLatch}
+      onAllNotesOff={handleAllNotesOff}
+      onOpenMenu={() => setIsSidebarOpen(true)}
+    />
+  );
+
   return (
     <div className="app-shell relative flex flex-col overflow-hidden bg-[#0d1117] font-sans text-slate-100">
-      <button
-        onClick={handleToggleSustainLatch}
-        className={`app-sustain-button fixed z-30 rounded-md border px-2 py-1 text-[11px] font-bold uppercase tracking-wide shadow-xl transition-all backdrop-blur-sm ${
-          settings.sustainLatch
-            ? 'border-amber-400 bg-amber-400/95 text-slate-950'
-            : 'border-[#30363d] bg-[#161b22]/90 text-slate-300 hover:bg-[#21262d]'
-        }`}
-        title="サステイン固定"
-      >
-        Sus
-      </button>
-
-      <button
-        onClick={handleAllNotesOff}
-        className="app-allnotes-button fixed z-30 rounded-md border border-[#30363d] bg-[#161b22]/90 px-2 py-1 text-[11px] text-slate-300 shadow-xl transition-all backdrop-blur-sm hover:bg-[#21262d]"
-        title="発音リセット"
-      >
-        <VolumeX size={12} />
-      </button>
-
-      <button
-        onClick={() => setIsSidebarOpen(true)}
-        className="app-menu-button fixed z-30 rounded-lg border border-[#30363d] bg-[#161b22]/90 p-2.5 text-slate-200 shadow-2xl transition-all backdrop-blur-sm hover:bg-[#21262d]"
-        title="設定を開く"
-      >
-        <Menu size={20} />
-      </button>
-
       <Sidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -422,6 +410,7 @@ export default function App() {
                   maxScrollOffset={upperColumnRange.maxScrollOffset}
                   keyWidth={settings.upperKeyWidth ?? settings.keyWidth}
                   onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width, upperKeyWidth: width})}
+                  actions={headerActions}
                 />
                 <div className="relative min-h-0 flex-1">
                   <InteractiveKeyboard
@@ -447,6 +436,7 @@ export default function App() {
                 maxScrollOffset={lowerColumnRange.maxScrollOffset}
                 keyWidth={settings.lowerKeyWidth ?? settings.keyWidth}
                 onChangeKeyWidth={(width) => handleUpdateSettings({...settings, keyWidth: width, lowerKeyWidth: width})}
+                actions={!settings.showTwoRows ? headerActions : undefined}
               />
               <div className="relative min-h-0 flex-1">
                 <InteractiveKeyboard
@@ -479,3 +469,38 @@ export default function App() {
     </div>
   );
 }
+
+const HeaderActions: React.FC<{
+  sustainLatch: boolean;
+  onToggleSustainLatch: () => void;
+  onAllNotesOff: () => void;
+  onOpenMenu: () => void;
+}> = ({sustainLatch, onToggleSustainLatch, onAllNotesOff, onOpenMenu}) => (
+  <>
+    <button
+      onClick={onToggleSustainLatch}
+      className={`rounded border px-2 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+        sustainLatch
+          ? 'border-amber-400 bg-amber-400/95 text-slate-950'
+          : 'border-[#30363d] bg-[#161b22] text-slate-300 hover:bg-[#21262d]'
+      }`}
+      title="サステイン固定"
+    >
+      Sus
+    </button>
+    <button
+      onClick={onAllNotesOff}
+      className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[10px] text-slate-300 transition-colors hover:bg-[#21262d]"
+      title="音を止める"
+    >
+      <VolumeX size={12} />
+    </button>
+    <button
+      onClick={onOpenMenu}
+      className="rounded border border-[#30363d] bg-[#161b22] p-1.5 text-slate-200 transition-colors hover:bg-[#21262d]"
+      title="メニュー"
+    >
+      <Menu size={14} />
+    </button>
+  </>
+);
