@@ -37,7 +37,7 @@ function clampScrollOffset(value: number | undefined): number {
 }
 
 function getC4FocusColumn(range: ReturnType<typeof getKeyboardColumnRange>): number {
-  return Math.max(0, Math.min(range.totalColumns - 1, (0 - range.startRepeat) * range.period));
+  return Math.max(0, Math.min(range.totalColumns - 1, -range.startColumn));
 }
 
 function normalizeSettings(settings: AppSettings): AppSettings {

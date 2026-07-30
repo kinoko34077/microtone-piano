@@ -50,7 +50,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const [pressedAddresses, setPressedAddresses] = useState<Set<number>>(new Set());
   const [viewportWidth, setViewportWidth] = useState(0);
   const columnRange = useMemo(() => getKeyboardColumnRange(layout, tuning, 0), [layout, tuning]);
-  const {period, startRepeat, totalColumns} = columnRange;
+  const {period, startColumn, totalColumns} = columnRange;
   const maxScrollableColumns = useMemo(() => {
     const contentWidth = settings.keyWidth * totalColumns + settings.keyWidth * settings.blackKeyWidthRatio;
     return Math.max(0, (contentWidth - viewportWidth) / settings.keyWidth);
@@ -74,10 +74,10 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
   const getLane = useCallback(
     (x: number, isBlack: boolean): LaneConfig | undefined => {
-      const laneIdx = (x % period) * 2 + (isBlack ? 1 : 0);
+      const laneIdx = positiveModulo(startColumn + x, period) * 2 + (isBlack ? 1 : 0);
       return layout.lanes[laneIdx];
     },
-    [layout, period],
+    [layout, period, startColumn],
   );
 
   const getAddressFromCoordinates = useCallback(
@@ -100,6 +100,10 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         const endX = Math.min(totalColumns - 1, roughX + 2);
 
         for (let x = startX; x <= endX; x += 1) {
+          if (!isBlackColumnInDisplayPitchRange(startColumn + x, period)) {
+            continue;
+          }
+
           const lane = getLane(x, true);
           const activeDepths = lane?.activeDepths ?? 0;
           if (activeDepths === 0 && !settings.showInvalidSections) {
@@ -152,9 +156,10 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       const x = Math.floor(address / 16);
       const isBlack = address % 16 >= 8;
       const depth = address % 8;
-      const baseX = x % period;
+      const absoluteColumn = startColumn + x;
+      const baseX = positiveModulo(absoluteColumn, period);
       const baseAddress = encodeAddress(baseX, isBlack, depth);
-      const octOffset = startRepeat + Math.floor(x / period);
+      const octOffset = Math.floor(absoluteColumn / period);
       const pitchRef = layout.mapping[baseAddress];
 
       if (pitchRef === undefined || pitchRef === -1) {
@@ -192,7 +197,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       }
       pressedPointersRef.current.set(pointerKey, {...current, voiceId});
     },
-    [layout, period, startRepeat, tuning],
+    [layout, period, startColumn, tuning],
   );
 
   const stopPointerNote = useCallback((pointerKey: string, updateVisualState: boolean = true) => {
@@ -294,7 +299,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       return;
     }
 
-    const focusKey = `${startRepeat}:${period}:${totalColumns}:${initialFocusColumn}`;
+    const focusKey = `${startColumn}:${period}:${totalColumns}:${initialFocusColumn}`;
     if (initialFocusAppliedRef.current === focusKey) {
       return;
     }
@@ -312,7 +317,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     onChangeScrollOffsetColumns,
     period,
     settings.keyWidth,
-    startRepeat,
+    startColumn,
     totalColumns,
     viewportWidth,
   ]);
@@ -340,8 +345,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const renderWhiteKey = (x: number) => {
     const lane = getLane(x, false);
     const activeDepths = lane?.activeDepths ?? 0;
-    const octOffset = startRepeat + Math.floor(x / period);
-    const baseX = x % period;
+    const absoluteColumn = startColumn + x;
+    const octOffset = Math.floor(absoluteColumn / period);
+    const baseX = positiveModulo(absoluteColumn, period);
     const segments = getRenderedSegments(activeDepths, lane, layout, false, settings.showInvalidSections);
 
     return (
@@ -395,15 +401,19 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   };
 
   const renderBlackKeyLane = (x: number) => {
+    const absoluteColumn = startColumn + x;
+    if (!isBlackColumnInDisplayPitchRange(absoluteColumn, period)) {
+      return null;
+    }
+
     const lane = getLane(x, true);
     const activeDepths = lane?.activeDepths ?? 0;
     if (activeDepths === 0 && !settings.showInvalidSections) {
       return null;
     }
 
-    const octOffset = Math.floor(x / period);
-    const logicalOctaveOffset = startRepeat + octOffset;
-    const baseX = x % period;
+    const logicalOctaveOffset = Math.floor(absoluteColumn / period);
+    const baseX = positiveModulo(absoluteColumn, period);
     const blackWidth = settings.keyWidth * settings.blackKeyWidthRatio;
     const center = (x + 1) * settings.keyWidth;
     const blackLeft = center - blackWidth / 2;
@@ -555,4 +565,31 @@ function calculateDepthFromRatio(
   }
 
   return getDepthFromBoundaries(clampedTopRatio, activeDepths, boundaries);
+}
+
+function positiveModulo(value: number, modulo: number): number {
+  return ((value % modulo) + modulo) % modulo;
+}
+
+function isBlackColumnInDisplayPitchRange(absoluteColumn: number, period: number): boolean {
+  if (period !== 7) {
+    return true;
+  }
+
+  const baseX = positiveModulo(absoluteColumn, period);
+  const repeat = Math.floor(absoluteColumn / period);
+  const blackStepByWhiteColumn: Record<number, number> = {
+    0: 1,
+    1: 3,
+    3: 6,
+    4: 8,
+    5: 10,
+  };
+  const blackStep = blackStepByWhiteColumn[baseX];
+  if (blackStep === undefined) {
+    return false;
+  }
+
+  const midi = 60 + repeat * 12 + blackStep;
+  return midi >= 9 && midi <= 120;
 }

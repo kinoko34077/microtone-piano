@@ -107,7 +107,9 @@ export const SampleMappingEditor: React.FC<SampleMappingEditorProps> = ({
 
               return (
                 <tr key={sample.fileName} className="border-b border-[#30363d]/60 hover:bg-[#0d1117]/40">
-                  <td className="p-2.5 font-mono text-[11px] text-slate-200">{sample.fileName}</td>
+                  <td className="p-2.5 font-mono text-[11px] text-slate-200">
+                    {sample.fileName.replace(/\.wav$/i, '.m4a')}
+                  </td>
                   <td className="p-2.5">
                     <input
                       type="text"
