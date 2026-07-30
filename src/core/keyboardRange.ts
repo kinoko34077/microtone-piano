@@ -2,8 +2,8 @@ import {encodeAddress} from './address';
 import {calculateFrequency, resolvePitch} from './pitch';
 import {LayoutPreset, TuningPreset} from '../types/keyboard';
 
-const MIN_DISPLAY_FREQUENCY = 27.5;
-const MAX_DISPLAY_FREQUENCY = 4186.01;
+const MIN_DISPLAY_FREQUENCY = 13.75;
+const MAX_DISPLAY_FREQUENCY = 8372.02;
 const MAX_REPEAT_ABS = 64;
 
 export interface KeyboardColumnRange {

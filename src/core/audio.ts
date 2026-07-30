@@ -24,6 +24,7 @@ export class AudioEngine {
   private masterGain: GainNode | null = null;
   private activeVoices: Map<string, VoiceNode> = new Map();
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
+  private decodedSampleCache: Map<string, AudioBuffer> = new Map();
   private maxPolyphony = 64;
   private soundSource: SoundSourceType = 'piano';
   private savedMasterVolume = 0.8;
@@ -129,7 +130,7 @@ export class AudioEngine {
     voiceGain.gain.linearRampToValueAtTime(velocityGain, now + attackTime);
     voiceGain.connect(this.masterGain!);
 
-    const {oscillators, sourceNodes, naturalDurationMs} = await this.createSourcesForVoice(ctx, frequency, voiceGain, now);
+    const {oscillators, sourceNodes, naturalDurationMs} = this.createSourcesForVoice(ctx, frequency, voiceGain, now);
 
     const voiceNode: VoiceNode = {
       voiceId,
@@ -276,12 +277,12 @@ export class AudioEngine {
     }
   }
 
-  private async createSourcesForVoice(
+  private createSourcesForVoice(
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
     now: number
-  ): Promise<Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}> {
+  ): Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number} {
     if (this.soundSource === 'piano') {
       return this.createPianoSources(ctx, frequency, gainNode, now);
     }
@@ -298,16 +299,16 @@ export class AudioEngine {
     };
   }
 
-  private async createPianoSources(
+  private createPianoSources(
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
     now: number
-  ): Promise<Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}> {
+  ): Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number} {
     const sample = findNearestPianoSample(frequency);
     if (sample) {
-      try {
-        const buffer = await this.loadPianoSampleBuffer(sample);
+      const buffer = this.decodedSampleCache.get(sample.id);
+      if (buffer) {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         const playbackRate = frequency / (sample.referenceFrequency || sample.baseFrequency);
@@ -320,37 +321,32 @@ export class AudioEngine {
           sourceNodes: [source],
           naturalDurationMs: Math.ceil((buffer.duration / Math.max(playbackRate, 0.001)) * 1000 + 50),
         };
-      } catch {
-        // Fallback to synthetic voice below.
       }
+
+      void this.loadPianoSampleBuffer(sample).catch(() => {
+        // Keep playback responsive; a later note can retry the missing sample.
+      });
     }
 
     const osc1 = ctx.createOscillator();
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(frequency, now);
 
-    const osc2 = ctx.createOscillator();
-    osc2.type = 'triangle';
-    osc2.frequency.setValueAtTime(frequency * 2, now);
-
-    const osc3 = ctx.createOscillator();
-    osc3.type = 'sine';
-    osc3.frequency.setValueAtTime(frequency * 3, now);
-
     osc1.connect(gainNode);
-    osc2.connect(gainNode);
-    osc3.connect(gainNode);
     osc1.start(now);
-    osc2.start(now);
-    osc3.start(now);
 
     return {
-      oscillators: [osc1, osc2, osc3],
+      oscillators: [osc1],
       sourceNodes: [],
     };
   }
 
   private async loadPianoSampleBuffer(sample: PianoSampleDefinition): Promise<AudioBuffer> {
+    const cached = this.decodedSampleCache.get(sample.id);
+    if (cached) {
+      return cached;
+    }
+
     const ctx = await this.ensureAudioContext();
     let pending = this.sampleBufferCache.get(sample.id);
 
@@ -361,7 +357,9 @@ export class AudioEngine {
             throw new Error(`Failed to fetch sample: ${sample.fileName}`);
           }
           const data = await response.arrayBuffer();
-          return ctx.decodeAudioData(data.slice(0));
+          const buffer = await ctx.decodeAudioData(data.slice(0));
+          this.decodedSampleCache.set(sample.id, buffer);
+          return buffer;
         })
         .catch((error) => {
           this.sampleBufferCache.delete(sample.id);

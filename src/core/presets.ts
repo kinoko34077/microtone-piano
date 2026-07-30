@@ -15,21 +15,31 @@ const noteNames12 = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#',
 const doremiNames12 = ['ド', 'ド#', 'レ', 'レ#', 'ミ', 'ファ', 'ファ#', 'ソ', 'ソ#', 'ラ', 'ラ#', 'シ'];
 
 const noteNames24 = [
-  'C', 'C+', 'C#', 'D-',
-  'D', 'D+', 'D#', 'E-',
-  'E', 'E+', 'F', 'F+',
-  'F#', 'G-', 'G', 'G+',
-  'G#', 'A-', 'A', 'A+',
-  'A#', 'B-', 'B', 'B+',
+  'C', 'C‡', 'C#', 'Dd',
+  'D', 'D‡', 'D#', 'Ed',
+  'E', 'E‡', 'F', 'F‡',
+  'F#', 'Gd', 'G', 'G‡',
+  'G#', 'Ad', 'A', 'A‡',
+  'A#', 'Bd', 'B', 'B‡',
 ];
 
 const doremiNames24 = [
-  'ド', 'ド+', 'ド#', 'レ-',
-  'レ', 'レ+', 'レ#', 'ミ-',
-  'ミ', 'ミ+', 'ファ', 'ファ+',
-  'ファ#', 'ソ-', 'ソ', 'ソ+',
-  'ソ#', 'ラ-', 'ラ', 'ラ+',
-  'ラ#', 'シ-', 'シ', 'シ+',
+  'ド', 'ド‡', 'ド#', 'レd',
+  'レ', 'レ‡', 'レ#', 'ミd',
+  'ミ', 'ミ‡', 'ファ', 'ファ‡',
+  'ファ#', 'ソd', 'ソ', 'ソ‡',
+  'ソ#', 'ラd', 'ラ', 'ラ‡',
+  'ラ#', 'シd', 'シ', 'シ‡',
+];
+
+const noteNames31 = [
+  'C', '^C', 'C#', '^C#', 'vD',
+  'D', '^D', 'D#', '^D#', 'vE',
+  'E', '^E', 'E#', 'F', '^F',
+  'F#', '^F#', 'vG', 'G', '^G',
+  'G#', '^G#', 'vA', 'A', '^A',
+  'A#', '^A#', 'vB', 'B', '^B',
+  'B#',
 ];
 
 const pitch12Edo: PitchDefinition[] = Array.from({length: 12}, (_, i) => ({
@@ -50,7 +60,7 @@ const pitch24Edo: PitchDefinition[] = Array.from({length: 24}, (_, i) => ({
 
 const pitch31Edo: PitchDefinition[] = Array.from({length: 31}, (_, i) => ({
   id: i,
-  name: `31EDO S${i}`,
+  name: noteNames31[i],
   type: 'edo',
   edo: 31,
   step: i,
@@ -101,8 +111,8 @@ export const STANDARD_TUNING_31EDO: TuningPreset = {
   baseFrequency: 261.63,
   baseStep: 0,
   pitches: pitch31Edo,
-  noteNames: Array.from({length: 31}, (_, i) => `31E_S${i}`),
-  doremiNames: Array.from({length: 31}, (_, i) => `S${i}`),
+  noteNames: noteNames31,
+  doremiNames: noteNames31,
 };
 
 export const STANDARD_TUNING_256TEST: TuningPreset = {

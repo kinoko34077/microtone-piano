@@ -36,6 +36,10 @@ function clampScrollOffset(value: number | undefined): number {
   return Math.max(0, value ?? 0);
 }
 
+function getC4FocusColumn(range: ReturnType<typeof getKeyboardColumnRange>): number {
+  return Math.max(0, Math.min(range.totalColumns - 1, (0 - range.startRepeat) * range.period));
+}
+
 function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     ...DEFAULT_APP_SETTINGS,
@@ -402,6 +406,8 @@ export default function App() {
 
   const upperScrollOffset = Math.min(settings.upperScrollOffset ?? 0, upperMaxScrollOffset);
   const lowerScrollOffset = Math.min(settings.lowerScrollOffset ?? 0, lowerMaxScrollOffset);
+  const upperInitialFocusColumn = getC4FocusColumn(upperColumnRange);
+  const lowerInitialFocusColumn = getC4FocusColumn(lowerColumnRange);
 
   const headerActions = (
     <HeaderActions
@@ -460,6 +466,7 @@ export default function App() {
                     onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
                     onMaxScrollOffsetChange={setUpperMaxScrollOffset}
                     externalPressedAddresses={pressedAddressSet}
+                    initialFocusColumn={upperInitialFocusColumn}
                   />
                 </div>
               </div>
@@ -485,6 +492,7 @@ export default function App() {
                   onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
                   onMaxScrollOffsetChange={setLowerMaxScrollOffset}
                   externalPressedAddresses={pressedAddressSet}
+                  initialFocusColumn={lowerInitialFocusColumn}
                 />
               </div>
             </div>

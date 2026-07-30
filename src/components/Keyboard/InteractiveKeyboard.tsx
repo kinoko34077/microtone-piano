@@ -14,6 +14,7 @@ interface InteractiveKeyboardProps {
   onChangeScrollOffsetColumns?: (offset: number) => void;
   onMaxScrollOffsetChange?: (offset: number) => void;
   externalPressedAddresses?: Set<number>;
+  initialFocusColumn?: number;
 }
 
 type PointerPressState = {
@@ -39,11 +40,13 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   onChangeScrollOffsetColumns,
   onMaxScrollOffsetChange,
   externalPressedAddresses,
+  initialFocusColumn,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pressTokenRef = useRef(0);
   const scrollRafRef = useRef<number | null>(null);
   const pressedPointersRef = useRef<Map<string, PointerPressState>>(new Map());
+  const initialFocusAppliedRef = useRef<string | null>(null);
   const [pressedAddresses, setPressedAddresses] = useState<Set<number>>(new Set());
   const [viewportWidth, setViewportWidth] = useState(0);
   const columnRange = useMemo(() => getKeyboardColumnRange(layout, tuning, 0), [layout, tuning]);
@@ -144,8 +147,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     [getLane, layout, period, settings.blackKeyHeightRatio, settings.blackKeyWidthRatio, settings.keyWidth, settings.showInvalidSections, totalColumns],
   );
 
-  const triggerNoteOn = useCallback(
-    async (address: number, pointerKey: string, velocity: number = 1.0) => {
+  const startPointerNote = useCallback(
+    async (address: number, pointerKey: string, velocity: number = 1.0, updateVisualState: boolean = true) => {
       const x = Math.floor(address / 16);
       const isBlack = address % 16 >= 8;
       const depth = address % 8;
@@ -165,14 +168,16 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
       const token = ++pressTokenRef.current;
       pressedPointersRef.current.set(pointerKey, {address, token});
-      setPressedAddresses((prev) => {
-        if (prev.has(address)) {
-          return prev;
-        }
-        const next = new Set(prev);
-        next.add(address);
-        return next;
-      });
+      if (updateVisualState) {
+        setPressedAddresses((prev) => {
+          if (prev.has(address)) {
+            return prev;
+          }
+          const next = new Set(prev);
+          next.add(address);
+          return next;
+        });
+      }
 
       const frequency = calculateFrequency(pitchDef, tuning, tuningOctaveShift + octOffset);
       const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, velocity, pointerKey);
@@ -190,7 +195,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     [layout, period, startRepeat, tuning],
   );
 
-  const triggerNoteOff = useCallback((pointerKey: string) => {
+  const stopPointerNote = useCallback((pointerKey: string, updateVisualState: boolean = true) => {
     const current = pressedPointersRef.current.get(pointerKey);
     if (!current) {
       return;
@@ -203,14 +208,16 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       pressedPointersRef.current.set(pointerKey, {...current, cancelled: true});
     }
 
-    setPressedAddresses((prev) => {
-      if (!prev.has(current.address)) {
-        return prev;
-      }
-      const next = new Set(prev);
-      next.delete(current.address);
-      return next;
-    });
+    if (updateVisualState) {
+      setPressedAddresses((prev) => {
+        if (!prev.has(current.address)) {
+          return prev;
+        }
+        const next = new Set(prev);
+        next.delete(current.address);
+        return next;
+      });
+    }
   }, []);
 
   const handlePointerDown = (event: React.PointerEvent) => {
@@ -219,7 +226,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     const address = getAddressFromCoordinates(event.clientX, event.clientY);
     if (address !== null) {
       const pressure = event.pressure && event.pressure > 0 ? event.pressure : 1.0;
-      void triggerNoteOn(address, pointerKey, pressure);
+      void startPointerNote(address, pointerKey, pressure);
     }
   };
 
@@ -235,13 +242,21 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     if (newAddress !== null) {
       if (!currentItem || currentItem.address !== newAddress) {
         if (currentItem) {
-          triggerNoteOff(pointerKey);
+          stopPointerNote(pointerKey, false);
         }
+        setPressedAddresses((prev) => {
+          const next = new Set(prev);
+          if (currentItem) {
+            next.delete(currentItem.address);
+          }
+          next.add(newAddress);
+          return next;
+        });
         const pressure = event.pressure && event.pressure > 0 ? event.pressure : 1.0;
-        void triggerNoteOn(newAddress, pointerKey, pressure);
+        void startPointerNote(newAddress, pointerKey, pressure, false);
       }
     } else if (currentItem) {
-      triggerNoteOff(pointerKey);
+      stopPointerNote(pointerKey);
     }
   };
 
@@ -268,6 +283,39 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       onChangeScrollOffsetColumns(clamped);
     }
   }, [maxScrollableColumns, onChangeScrollOffsetColumns, scrollOffsetColumns, settings.keyWidth]);
+
+  useEffect(() => {
+    if (
+      !containerRef.current ||
+      !onChangeScrollOffsetColumns ||
+      initialFocusColumn === undefined ||
+      viewportWidth <= 0
+    ) {
+      return;
+    }
+
+    const focusKey = `${startRepeat}:${period}:${totalColumns}:${initialFocusColumn}`;
+    if (initialFocusAppliedRef.current === focusKey) {
+      return;
+    }
+
+    initialFocusAppliedRef.current = focusKey;
+    const visibleColumns = viewportWidth / settings.keyWidth;
+    const target = Math.max(
+      0,
+      Math.min(maxScrollableColumns, initialFocusColumn - (visibleColumns / 2) + 0.5),
+    );
+    onChangeScrollOffsetColumns(target);
+  }, [
+    initialFocusColumn,
+    maxScrollableColumns,
+    onChangeScrollOffsetColumns,
+    period,
+    settings.keyWidth,
+    startRepeat,
+    totalColumns,
+    viewportWidth,
+  ]);
 
   useEffect(() => {
     onMaxScrollOffsetChange?.(maxScrollableColumns);
@@ -436,8 +484,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         onScroll={handleScroll}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={(event) => triggerNoteOff(`pointer_${event.pointerId}`)}
-        onPointerCancel={(event) => triggerNoteOff(`pointer_${event.pointerId}`)}
+        onPointerUp={(event) => stopPointerNote(`pointer_${event.pointerId}`)}
+        onPointerCancel={(event) => stopPointerNote(`pointer_${event.pointerId}`)}
       >
         <div
           className="relative h-full"

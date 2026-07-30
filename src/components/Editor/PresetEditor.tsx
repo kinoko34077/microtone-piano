@@ -107,7 +107,11 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
       return;
     }
 
+    const previousBodyTouchAction = document.body.style.touchAction;
+    document.body.style.touchAction = 'none';
+
     const handlePointerMove = (event: PointerEvent) => {
+      event.preventDefault();
       const base =
         boundaryPreview &&
         boundaryPreview.isBlack === boundaryDrag.isBlack &&
@@ -161,6 +165,7 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
     window.addEventListener('pointerup', handlePointerUp);
     window.addEventListener('pointercancel', handlePointerUp);
     return () => {
+      document.body.style.touchAction = previousBodyTouchAction;
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
@@ -595,7 +600,7 @@ const EditorKeyboardSurface: React.FC<{
   const blackWidth = Math.round(keyWidth * settings.blackKeyWidthRatio);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-[#273241] bg-[#111820] p-4">
+    <div className={`overflow-x-auto rounded-lg border border-[#273241] bg-[#111820] p-4 ${keyboardMode === 'boundary' ? 'touch-none' : 'touch-pan-x'}`}>
       <div className="relative mx-auto" style={{width, height: KEYBOARD_HEIGHT}}>
         {Array.from({length: displayHorizontalCount}, (_, x) => {
           const lane = layout.lanes[x * 2];
@@ -893,7 +898,7 @@ const BoundaryHandles: React.FC<{
           className={`absolute z-40 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border bg-[#0a0f16] shadow-md ${
             isBlack ? 'border-sky-300' : 'border-sky-500'
           } ${side === 'left' ? '-left-3' : '-right-3'}`}
-          style={{top: handleTop}}
+          style={{top: handleTop, touchAction: 'none'}}
           aria-label="段境界を調整"
           title="段境界を調整"
         >
