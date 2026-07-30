@@ -1,8 +1,11 @@
 import {ActiveVoice, OutOfRangeNotice} from '../types/keyboard';
-import {findNearestPianoSample, PianoSampleDefinition} from './pianoSamples';
+import {findNearestPianoSample, getActivePianoSamples, PianoSampleDefinition} from './pianoSamples';
 import {isFrequencyOutOfRecommendedRange} from './pitch';
 
 type SoundSourceType = 'piano' | 'sawtooth' | 'square';
+
+const MAX_PIANO_START_LATENCY_SECONDS = 0.08;
+const PIANO_PRELOAD_CONCURRENCY = 1;
 
 interface VoiceNode {
   voiceId: string;
@@ -25,6 +28,7 @@ export class AudioEngine {
   private activeVoices: Map<string, VoiceNode> = new Map();
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
   private decodedSampleCache: Map<string, AudioBuffer> = new Map();
+  private pianoPreloadPromise: Promise<void> | null = null;
   private maxPolyphony = 64;
   private soundSource: SoundSourceType = 'piano';
   private savedMasterVolume = 0.8;
@@ -130,7 +134,21 @@ export class AudioEngine {
     voiceGain.gain.linearRampToValueAtTime(velocityGain, now + attackTime);
     voiceGain.connect(this.masterGain!);
 
-    const {oscillators, sourceNodes, naturalDurationMs} = this.createSourcesForVoice(ctx, frequency, voiceGain, now);
+    if (this.soundSource === 'piano') {
+      void this.preloadPianoSamples();
+    }
+
+    const sources = await this.createSourcesForVoice(ctx, frequency, voiceGain, now);
+    if (!sources) {
+      try {
+        voiceGain.disconnect();
+      } catch {
+        // ignore disconnect errors
+      }
+      return voiceId;
+    }
+
+    const {oscillators, sourceNodes, naturalDurationMs} = sources;
 
     const voiceNode: VoiceNode = {
       voiceId,
@@ -226,6 +244,20 @@ export class AudioEngine {
     }));
   }
 
+  public async preloadPianoSamples(): Promise<void> {
+    if (this.soundSource !== 'piano') {
+      return;
+    }
+    if (this.pianoPreloadPromise) {
+      return this.pianoPreloadPromise;
+    }
+
+    this.pianoPreloadPromise = this.runPianoSamplePreload().finally(() => {
+      this.pianoPreloadPromise = null;
+    });
+    return this.pianoPreloadPromise;
+  }
+
   private checkSustainRelease() {
     if (!this.isSustainActive && this.ctx) {
       const now = this.ctx.currentTime;
@@ -277,12 +309,12 @@ export class AudioEngine {
     }
   }
 
-  private createSourcesForVoice(
+  private async createSourcesForVoice(
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
     now: number
-  ): Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number} {
+  ): Promise<(Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}) | null> {
     if (this.soundSource === 'piano') {
       return this.createPianoSources(ctx, frequency, gainNode, now);
     }
@@ -299,46 +331,69 @@ export class AudioEngine {
     };
   }
 
-  private createPianoSources(
+  private async createPianoSources(
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
     now: number
-  ): Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number} {
+  ): Promise<(Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}) | null> {
     const sample = findNearestPianoSample(frequency);
-    if (sample) {
-      const buffer = this.decodedSampleCache.get(sample.id);
-      if (buffer) {
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        const playbackRate = frequency / (sample.referenceFrequency || sample.baseFrequency);
-        source.playbackRate.setValueAtTime(playbackRate, now);
-        source.connect(gainNode);
-        source.start(now);
-
-        return {
-          oscillators: [],
-          sourceNodes: [source],
-          naturalDurationMs: Math.ceil((buffer.duration / Math.max(playbackRate, 0.001)) * 1000 + 50),
-        };
-      }
-
-      void this.loadPianoSampleBuffer(sample).catch(() => {
-        // Keep playback responsive; a later note can retry the missing sample.
-      });
+    if (!sample) {
+      return null;
     }
 
-    const osc1 = ctx.createOscillator();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(frequency, now);
+    let buffer = this.decodedSampleCache.get(sample.id);
+    if (!buffer) {
+      try {
+        buffer = await this.loadPianoSampleBuffer(sample);
+      } catch {
+        return null;
+      }
+    }
 
-    osc1.connect(gainNode);
-    osc1.start(now);
+    const elapsed = ctx.currentTime - now;
+    if (elapsed > MAX_PIANO_START_LATENCY_SECONDS) {
+      return null;
+    }
+
+    const startAt = Math.max(ctx.currentTime, now);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const playbackRate = frequency / (sample.referenceFrequency || sample.baseFrequency);
+    source.playbackRate.setValueAtTime(playbackRate, startAt);
+    source.connect(gainNode);
+    source.start(startAt);
 
     return {
-      oscillators: [osc1],
-      sourceNodes: [],
+      oscillators: [],
+      sourceNodes: [source],
+      naturalDurationMs: Math.ceil((buffer.duration / Math.max(playbackRate, 0.001)) * 1000 + 50),
     };
+  }
+
+  private async runPianoSamplePreload(): Promise<void> {
+    await this.ensureAudioContext();
+    const samples = getActivePianoSamples();
+    let nextIndex = 0;
+
+    const worker = async () => {
+      while (nextIndex < samples.length) {
+        const sample = samples[nextIndex];
+        nextIndex += 1;
+        if (!sample || this.decodedSampleCache.has(sample.id)) {
+          continue;
+        }
+        try {
+          await this.loadPianoSampleBuffer(sample);
+        } catch {
+          // Missing or unsupported samples are retried by direct note requests.
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({length: Math.min(PIANO_PRELOAD_CONCURRENCY, samples.length)}, () => worker()),
+    );
   }
 
   private async loadPianoSampleBuffer(sample: PianoSampleDefinition): Promise<AudioBuffer> {

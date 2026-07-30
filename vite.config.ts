@@ -8,6 +8,7 @@ export default defineConfig(() => {
     // Use relative asset paths so the build works under GitHub Pages project URLs.
     base: './',
     plugins: [react(), tailwindcss()],
+    assetsInclude: ['**/*.m4a'],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

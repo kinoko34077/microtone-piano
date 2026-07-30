@@ -41,9 +41,10 @@ const NOTE_INDEX: Record<string, number> = {
   B: 11,
 };
 
-const sampleUrls = import.meta.glob('../../Grand Piano/*.wav', {
+const sampleUrls = import.meta.glob('../../Grandpiano \\(m4a\\)/*.m4a', {
   eager: true,
   import: 'default',
+  query: '?url',
 }) as Record<string, string>;
 
 export const DEFAULT_PIANO_SAMPLE_ROWS: PianoSampleRow[] = [
@@ -126,19 +127,22 @@ const DEFAULT_SAMPLE_MAP = new Map(
 );
 
 function getNumericSampleOrder(fileName: string): number {
-  const match = fileName.match(/\((\d+)\)\.wav$/i);
+  const match = fileName.match(/\((\d+)\)\.(?:wav|m4a)$/i);
   return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
-const SAMPLE_CATALOG: PianoSampleDefinition[] = Object.entries(sampleUrls)
-  .map(([path, url]) => {
-    const fileName = path.split('/').pop();
-    if (!fileName) {
-      return null;
-    }
+const SAMPLE_URL_BY_WAV_NAME = new Map(
+  Object.entries(sampleUrls).map(([path, url]) => {
+    const sourceFileName = path.split('/').pop() ?? '';
+    return [sourceFileName.replace(/\.m4a$/i, '.wav'), url];
+  }),
+);
 
+const SAMPLE_CATALOG: PianoSampleDefinition[] = DEFAULT_PIANO_SAMPLE_ROWS
+  .map(([fileName]) => {
+    const url = SAMPLE_URL_BY_WAV_NAME.get(fileName);
     const sampleInfo = DEFAULT_SAMPLE_MAP.get(fileName);
-    if (!sampleInfo) {
+    if (!url || !sampleInfo) {
       return null;
     }
 
