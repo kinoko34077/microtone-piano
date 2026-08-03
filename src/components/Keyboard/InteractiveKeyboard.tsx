@@ -24,6 +24,15 @@ type PointerPressState = {
   cancelled?: boolean;
 };
 
+type PendingPointerMove = {
+  pointerId: number;
+  pointerType: string;
+  buttons: number;
+  clientX: number;
+  clientY: number;
+  pressure: number;
+};
+
 type SegmentRenderInfo = {
   depth: number;
   heightPercent: number;
@@ -45,6 +54,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const pressTokenRef = useRef(0);
   const scrollRafRef = useRef<number | null>(null);
+  const pointerMoveRafRef = useRef<number | null>(null);
+  const pendingPointerMovesRef = useRef<Map<number, PendingPointerMove>>(new Map());
   const pressedPointersRef = useRef<Map<string, PointerPressState>>(new Map());
   const initialFocusAppliedRef = useRef<string | null>(null);
   const [pressedAddresses, setPressedAddresses] = useState<Set<number>>(new Set());
@@ -226,7 +237,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   }, []);
 
   const handlePointerDown = (event: React.PointerEvent) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some mobile browsers can reject capture during gesture transitions.
+    }
     const pointerKey = `pointer_${event.pointerId}`;
     const address = getAddressFromCoordinates(event.clientX, event.clientY);
     if (address !== null) {
@@ -235,35 +251,73 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     }
   };
 
+  const processPointerMove = useCallback(
+    (move: PendingPointerMove) => {
+      if (!move.buttons && move.pointerType === 'mouse') {
+        return;
+      }
+
+      const pointerKey = `pointer_${move.pointerId}`;
+      const currentItem = pressedPointersRef.current.get(pointerKey);
+      const newAddress = getAddressFromCoordinates(move.clientX, move.clientY);
+
+      if (newAddress !== null) {
+        if (!currentItem || currentItem.address !== newAddress) {
+          if (currentItem) {
+            stopPointerNote(pointerKey, false);
+          }
+          setPressedAddresses((prev) => {
+            const next = new Set(prev);
+            if (currentItem) {
+              next.delete(currentItem.address);
+            }
+            next.add(newAddress);
+            return next;
+          });
+          const pressure = move.pressure && move.pressure > 0 ? move.pressure : 1.0;
+          void startPointerNote(newAddress, pointerKey, pressure, false);
+        }
+      } else if (currentItem) {
+        stopPointerNote(pointerKey);
+      }
+    },
+    [getAddressFromCoordinates, startPointerNote, stopPointerNote],
+  );
+
+  const flushPointerMoves = useCallback(() => {
+    pointerMoveRafRef.current = null;
+    const moves = Array.from(pendingPointerMovesRef.current.values());
+    pendingPointerMovesRef.current.clear();
+    moves.forEach(processPointerMove);
+  }, [processPointerMove]);
+
   const handlePointerMove = (event: React.PointerEvent) => {
+    event.preventDefault();
     if (!event.buttons && event.pointerType === 'mouse') {
       return;
     }
 
-    const pointerKey = `pointer_${event.pointerId}`;
-    const currentItem = pressedPointersRef.current.get(pointerKey);
-    const newAddress = getAddressFromCoordinates(event.clientX, event.clientY);
+    pendingPointerMovesRef.current.set(event.pointerId, {
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      buttons: event.buttons,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pressure: event.pressure,
+    });
 
-    if (newAddress !== null) {
-      if (!currentItem || currentItem.address !== newAddress) {
-        if (currentItem) {
-          stopPointerNote(pointerKey, false);
-        }
-        setPressedAddresses((prev) => {
-          const next = new Set(prev);
-          if (currentItem) {
-            next.delete(currentItem.address);
-          }
-          next.add(newAddress);
-          return next;
-        });
-        const pressure = event.pressure && event.pressure > 0 ? event.pressure : 1.0;
-        void startPointerNote(newAddress, pointerKey, pressure, false);
-      }
-    } else if (currentItem) {
-      stopPointerNote(pointerKey);
+    if (pointerMoveRafRef.current === null) {
+      pointerMoveRafRef.current = window.requestAnimationFrame(flushPointerMoves);
     }
   };
+
+  const stopPointerById = useCallback(
+    (pointerId: number) => {
+      pendingPointerMovesRef.current.delete(pointerId);
+      stopPointerNote(`pointer_${pointerId}`);
+    },
+    [stopPointerNote],
+  );
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -326,6 +380,17 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     onMaxScrollOffsetChange?.(maxScrollableColumns);
   }, [maxScrollableColumns, onMaxScrollOffsetChange]);
 
+  useEffect(() => {
+    return () => {
+      if (pointerMoveRafRef.current !== null) {
+        window.cancelAnimationFrame(pointerMoveRafRef.current);
+      }
+      if (scrollRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollRafRef.current);
+      }
+    };
+  }, []);
+
   const handleScroll = useCallback(() => {
     if (!containerRef.current || !onChangeScrollOffsetColumns) {
       return;
@@ -370,12 +435,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`white_${x}_depth_${depth}`}
-              className={`relative flex flex-col justify-end border-b border-slate-200 p-1 transition-colors ${
+              className={`relative flex flex-col justify-end border-b border-slate-200 p-1 ${
                 isPressed
                   ? 'bg-gradient-to-b from-amber-300 to-amber-400 text-amber-950 shadow-inner'
                   : isInvalid
                     ? 'border-slate-300 bg-slate-200/80 text-slate-400'
-                    : 'text-slate-800 hover:bg-slate-100'
+                    : 'text-slate-800'
               }`}
               style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
             >
@@ -443,12 +508,12 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`black_${x}_depth_${depth}`}
-              className={`relative flex flex-col justify-end border-b border-slate-800 p-0.5 transition-colors ${
+              className={`relative flex flex-col justify-end border-b border-slate-800 p-0.5 ${
                 isPressed
                   ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-inner'
                   : isInvalid
                     ? 'border-slate-800 bg-slate-900/60 text-slate-700'
-                    : 'bg-slate-900 text-slate-200 hover:bg-slate-800'
+                    : 'bg-slate-900 text-slate-200'
               }`}
               style={{height: `${heightPercent}%`, flex: '0 0 auto'}}
             >
@@ -494,8 +559,11 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         onScroll={handleScroll}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={(event) => stopPointerNote(`pointer_${event.pointerId}`)}
-        onPointerCancel={(event) => stopPointerNote(`pointer_${event.pointerId}`)}
+        onPointerUp={(event) => stopPointerById(event.pointerId)}
+        onPointerCancel={(event) => stopPointerById(event.pointerId)}
+        onLostPointerCapture={(event) => stopPointerById(event.pointerId)}
+        onContextMenu={(event) => event.preventDefault()}
+        style={{touchAction: 'none'}}
       >
         <div
           className="relative h-full"

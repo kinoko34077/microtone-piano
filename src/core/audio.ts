@@ -29,7 +29,7 @@ export class AudioEngine {
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
   private decodedSampleCache: Map<string, AudioBuffer> = new Map();
   private pianoPreloadPromise: Promise<void> | null = null;
-  private maxPolyphony = 64;
+  private maxPolyphony = 32;
   private soundSource: SoundSourceType = 'piano';
   private savedMasterVolume = 0.8;
   private noteDecayMs = 0;

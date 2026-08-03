@@ -18,7 +18,17 @@ body,
 body {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   touch-action: manipulation;
+}
+
+input,
+textarea,
+select {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .app-shell {
