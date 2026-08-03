@@ -29,6 +29,8 @@ export class AudioEngine {
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
   private decodedSampleCache: Map<string, AudioBuffer> = new Map();
   private pianoPreloadPromise: Promise<void> | null = null;
+  private pianoPreloadTimerId: number | null = null;
+  private pendingVoiceCount = 0;
   private maxPolyphony = 32;
   private soundSource: SoundSourceType = 'piano';
   private savedMasterVolume = 0.8;
@@ -135,10 +137,13 @@ export class AudioEngine {
     voiceGain.connect(this.masterGain!);
 
     if (this.soundSource === 'piano') {
-      void this.preloadPianoSamples();
+      this.schedulePianoPreload();
     }
 
-    const sources = await this.createSourcesForVoice(ctx, frequency, voiceGain, now);
+    this.pendingVoiceCount += 1;
+    const sources = await this.createSourcesForVoice(ctx, frequency, voiceGain, now).finally(() => {
+      this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
+    });
     if (!sources) {
       try {
         voiceGain.disconnect();
@@ -258,6 +263,22 @@ export class AudioEngine {
     return this.pianoPreloadPromise;
   }
 
+  private schedulePianoPreload() {
+    if (this.pianoPreloadTimerId !== null || this.pianoPreloadPromise) {
+      return;
+    }
+
+    // Keep full-sample decoding out of the first interaction and glissando path.
+    this.pianoPreloadTimerId = window.setTimeout(() => {
+      this.pianoPreloadTimerId = null;
+      if (this.activeVoices.size === 0 && this.pendingVoiceCount === 0) {
+        void this.preloadPianoSamples();
+      } else {
+        this.schedulePianoPreload();
+      }
+    }, 2000);
+  }
+
   private checkSustainRelease() {
     if (!this.isSustainActive && this.ctx) {
       const now = this.ctx.currentTime;
@@ -270,7 +291,7 @@ export class AudioEngine {
   }
 
   private trimVoicesIfNeeded(now: number) {
-    if (this.activeVoices.size < this.maxPolyphony) {
+    if (this.activeVoices.size + this.pendingVoiceCount < this.maxPolyphony) {
       return;
     }
 

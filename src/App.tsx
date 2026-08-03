@@ -80,6 +80,28 @@ export default function App() {
     () => getKeyboardColumnRange(currentLayout, currentTuning, 0),
     [currentLayout, currentTuning],
   );
+  const keyboardVisualSettings = useMemo(
+    () => ({
+      ...settings,
+      keyWidth: settings.keyWidth,
+    }),
+    [
+      settings.blackKeyHeightRatio,
+      settings.blackKeyWidthRatio,
+      settings.keyWidth,
+      settings.pitchLabelMode,
+      settings.showAddressBinary,
+      settings.showInvalidSections,
+    ],
+  );
+  const upperKeyboardSettings = useMemo(
+    () => ({...keyboardVisualSettings, keyWidth: settings.upperKeyWidth ?? settings.keyWidth}),
+    [keyboardVisualSettings, settings.keyWidth, settings.upperKeyWidth],
+  );
+  const lowerKeyboardSettings = useMemo(
+    () => ({...keyboardVisualSettings, keyWidth: settings.lowerKeyWidth ?? settings.keyWidth}),
+    [keyboardVisualSettings, settings.keyWidth, settings.lowerKeyWidth],
+  );
 
   useEffect(() => {
     const initData = async () => {
@@ -461,7 +483,7 @@ export default function App() {
                   <InteractiveKeyboard
                     layout={currentLayout}
                     tuning={currentTuning}
-                    settings={{...settings, keyWidth: settings.upperKeyWidth ?? settings.keyWidth}}
+                    settings={upperKeyboardSettings}
                     scrollOffsetColumns={upperScrollOffset}
                     onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, upperScrollOffset: offset})}
                     onMaxScrollOffsetChange={setUpperMaxScrollOffset}
@@ -487,7 +509,7 @@ export default function App() {
                 <InteractiveKeyboard
                   layout={currentLayout}
                   tuning={currentTuning}
-                  settings={{...settings, keyWidth: settings.lowerKeyWidth ?? settings.keyWidth}}
+                  settings={lowerKeyboardSettings}
                   scrollOffsetColumns={lowerScrollOffset}
                   onChangeScrollOffsetColumns={(offset) => handleUpdateSettings({...settings, lowerScrollOffset: offset})}
                   onMaxScrollOffsetChange={setLowerMaxScrollOffset}
