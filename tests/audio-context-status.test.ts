@@ -33,26 +33,27 @@ test('retryAudioContext reuses the same initialization path', async () => {
   assert.match(retry, /return this\.ensureAudioContext\(\)/);
 });
 
-test('App subscribes to AudioContext status and exposes a user-gesture retry control', async () => {
-  const source = await read('src/App.tsx');
+test('bounded performance-header component subscribes to status and retries from a user gesture', async () => {
+  const [app, component] = await Promise.all([
+    read('src/App.tsx'),
+    read('src/components/AudioContextStatusBadge.tsx'),
+  ]);
 
-  assert.match(source, /AudioContextStatus/);
-  assert.match(source, /setAudioContextStatusCallback/);
-  assert.match(source, /audioContextStatus=\{audioContextStatus\}/);
-  assert.match(source, /onRetryAudio=\{handleRetryAudio\}/);
-  assert.match(source, /globalAudioEngine\.retryAudioContext\(\)/);
-  assert.match(source, /audioContextStatus\.kind === 'failed'/);
-  assert.match(source, />再試行</);
-  assert.match(source, /音声準備中/);
-  assert.match(source, /音声準備済/);
-  assert.match(source, /音声エラー/);
+  assert.match(app, /AudioContextStatusBadge/);
+  assert.match(component, /AudioContextStatus/);
+  assert.match(component, /setAudioContextStatusCallback/);
+  assert.match(component, /globalAudioEngine\.retryAudioContext\(\)/);
+  assert.match(component, /status\.kind === 'failed'/);
+  assert.match(component, />再試行</);
+  assert.match(component, /音声準備中/);
+  assert.match(component, /音声準備済/);
+  assert.match(component, /音声エラー/);
 });
 
 test('audio status remains compact and live on the performance surface', async () => {
-  const source = await read('src/App.tsx');
-  const header = section(source, 'const HeaderActions:', ');');
+  const component = await read('src/components/AudioContextStatusBadge.tsx');
 
-  assert.match(header, /role="status"/);
-  assert.match(header, /aria-live="polite"/);
-  assert.match(header, /audioContextStatus\.message/);
+  assert.match(component, /role="status"/);
+  assert.match(component, /aria-live="polite"/);
+  assert.match(component, /status\.message/);
 });
