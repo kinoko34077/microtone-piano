@@ -11,6 +11,7 @@ import {storageService, DEFAULT_APP_SETTINGS} from './core/storage';
 import {globalAudioEngine} from './core/audio';
 import {calculateFrequency, resolvePitch} from './core/pitch';
 import {keyToAddress} from './core/pcKeyboard';
+import {PcKeyPressRegistry} from './core/pcKeyPressRegistry';
 import {getKeyboardColumnRange} from './core/keyboardRange';
 import {setPianoSampleOverrides} from './core/pianoSamples';
 import {Sidebar} from './components/Sidebar';
@@ -70,7 +71,10 @@ export default function App() {
   const saveTimerRef = useRef<number | null>(null);
   const currentLayoutRef = useRef<LayoutPreset>(STANDARD_LAYOUT_12EDO);
   const currentTuningRef = useRef<TuningPreset>(STANDARD_TUNING_12EDO);
-  const pcPressedMapRef = useRef<Map<string, PressedPcKey>>(new Map());
+  const pcKeyRegistryRef = useRef<PcKeyPressRegistry | null>(null);
+  const pcKeyRegistry =
+    pcKeyRegistryRef.current ??
+    (pcKeyRegistryRef.current = new PcKeyPressRegistry((voiceId) => globalAudioEngine.noteOff(voiceId)));
 
   const upperColumnRange = useMemo(
     () => getKeyboardColumnRange(currentLayout, currentTuning, 0),
@@ -198,10 +202,6 @@ export default function App() {
     currentTuningRef.current = currentTuning;
   }, [currentTuning]);
 
-  useEffect(() => {
-    pcPressedMapRef.current = pcPressedMap;
-  }, [pcPressedMap]);
-
   const handleToggleSustainLatch = useCallback(() => {
     const next = !settings.sustainLatch;
     handleUpdateSettings({...settings, sustainLatch: next});
@@ -209,9 +209,10 @@ export default function App() {
   }, [handleUpdateSettings, settings]);
 
   const handleAllNotesOff = useCallback(() => {
+    pcKeyRegistry.cancelAll();
     globalAudioEngine.allNotesOff();
     setPcPressedMap(new Map());
-  }, []);
+  }, [pcKeyRegistry]);
 
   const handleDuplicateLayout = useCallback(() => {
     const duplicate: LayoutPreset = {
@@ -257,7 +258,7 @@ export default function App() {
 
   const handleSelectLayout = useCallback(
     (layout: LayoutPreset) => {
-      globalAudioEngine.allNotesOff();
+      handleAllNotesOff();
       setCurrentLayout(layout);
       const matched = layout.defaultTuningId
         ? allTunings.find((tuning) => tuning.id === layout.defaultTuningId)
@@ -273,14 +274,17 @@ export default function App() {
         }),
       );
     },
-    [allTunings],
+    [allTunings, handleAllNotesOff],
   );
 
-  const handleSelectTuning = useCallback((tuning: TuningPreset) => {
-    globalAudioEngine.allNotesOff();
-    setCurrentTuning(tuning);
-    setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: tuning.id}));
-  }, []);
+  const handleSelectTuning = useCallback(
+    (tuning: TuningPreset) => {
+      handleAllNotesOff();
+      setCurrentTuning(tuning);
+      setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: tuning.id}));
+    },
+    [handleAllNotesOff],
+  );
 
   const handleUpdateLayout = useCallback((newLayout: LayoutPreset) => {
     if (newLayout.isStandard) {
@@ -332,10 +336,8 @@ export default function App() {
 
     const releasePcHeldNotes = () => {
       globalAudioEngine.setSustainMomentary(false);
-      setPcPressedMap((prev) => {
-        pcPressedMapRef.current.forEach(({voiceId}) => globalAudioEngine.noteOff(voiceId));
-        return new Map();
-      });
+      pcKeyRegistry.cancelAll();
+      setPcPressedMap(new Map());
     };
 
     const handleKeyDown = async (event: KeyboardEvent) => {
@@ -350,7 +352,7 @@ export default function App() {
       }
 
       const address = keyToAddress(event.key, settings.pcDepthOffset);
-      if (address === null || pcPressedMapRef.current.has(event.key)) {
+      if (address === null || pcKeyRegistry.has(event.key)) {
         return;
       }
 
@@ -368,9 +370,18 @@ export default function App() {
       }
 
       const frequency = calculateFrequency(pitchDef, activeTuning, octaveShift);
-      const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, 1.0, `pc_${event.key}`);
-      setPcPressedMap((prev) => new Map(prev).set(event.key, {voiceId, address}));
-      setEditorSelectedAddress(address);
+      const press = pcKeyRegistry.begin(event.key, address);
+      try {
+        const voiceId = await globalAudioEngine.noteOn(address, pitchRef, frequency, 1.0, `pc_${event.key}`);
+        if (!pcKeyRegistry.resolve(event.key, press.token, voiceId)) {
+          return;
+        }
+        setPcPressedMap((prev) => new Map(prev).set(event.key, {voiceId, address}));
+        setEditorSelectedAddress(address);
+      } catch (error) {
+        pcKeyRegistry.abort(event.key, press.token);
+        throw error;
+      }
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -384,13 +395,15 @@ export default function App() {
         return;
       }
 
-      const pressed = pcPressedMapRef.current.get(event.key);
-      if (!pressed) {
+      if (!pcKeyRegistry.has(event.key)) {
         return;
       }
 
-      globalAudioEngine.noteOff(pressed.voiceId);
+      pcKeyRegistry.release(event.key);
       setPcPressedMap((prev) => {
+        if (!prev.has(event.key)) {
+          return prev;
+        }
         const next = new Map(prev);
         next.delete(event.key);
         return next;
@@ -418,7 +431,7 @@ export default function App() {
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [settings.pcDepthOffset]);
+  }, [pcKeyRegistry, settings.pcDepthOffset]);
 
   const pressedAddressSet = useMemo(() => {
     const next = new Set<number>();
