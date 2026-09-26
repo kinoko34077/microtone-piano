@@ -8,7 +8,7 @@ import {
   STANDARD_TUNING_12EDO,
 } from './core/presets';
 import {storageService, DEFAULT_APP_SETTINGS} from './core/storage';
-import {globalAudioEngine} from './core/audio';
+import {globalAudioEngine, PianoSampleStatus} from './core/audio';
 import {calculateFrequency, resolvePitch} from './core/pitch';
 import {keyToAddress} from './core/pcKeyboard';
 import {PcKeyPressRegistry} from './core/pcKeyPressRegistry';
@@ -64,6 +64,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editorSelectedAddress, setEditorSelectedAddress] = useState<number | null>(null);
   const [notices, setNotices] = useState<OutOfRangeNotice[]>([]);
+  const [pianoSampleStatus, setPianoSampleStatus] = useState<PianoSampleStatus | null>(null);
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
   const [settingsReady, setSettingsReady] = useState(false);
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
@@ -143,9 +144,13 @@ export default function App() {
     globalAudioEngine.setOutOfRangeNoticeCallback((notice) => {
       setNotices((prev) => [...prev.slice(-7), notice]);
     });
+    globalAudioEngine.setPianoSampleStatusCallback((status) => {
+      setPianoSampleStatus(status);
+    });
 
     return () => {
       globalAudioEngine.setOutOfRangeNoticeCallback(() => {});
+      globalAudioEngine.setPianoSampleStatusCallback(() => {});
     };
   }, []);
 
@@ -447,6 +452,7 @@ export default function App() {
   const headerActions = (
     <HeaderActions
       sustainLatch={settings.sustainLatch}
+      pianoSampleStatus={pianoSampleStatus}
       onToggleSustainLatch={handleToggleSustainLatch}
       onAllNotesOff={handleAllNotesOff}
       onOpenMenu={() => setIsSidebarOpen(true)}
@@ -574,11 +580,29 @@ export default function App() {
 
 const HeaderActions: React.FC<{
   sustainLatch: boolean;
+  pianoSampleStatus: PianoSampleStatus | null;
   onToggleSustainLatch: () => void;
   onAllNotesOff: () => void;
   onOpenMenu: () => void;
-}> = ({sustainLatch, onToggleSustainLatch, onAllNotesOff, onOpenMenu}) => (
+}> = ({sustainLatch, pianoSampleStatus, onToggleSustainLatch, onAllNotesOff, onOpenMenu}) => (
   <>
+    {pianoSampleStatus && (
+      <span
+        role="status"
+        aria-live="polite"
+        title={pianoSampleStatus.message}
+        className="max-w-40 truncate rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[10px] text-slate-300"
+      >
+        <span aria-hidden="true">
+          {pianoSampleStatus.kind === 'loading'
+            ? '音源準備中'
+            : pianoSampleStatus.kind === 'delayed'
+              ? '音源遅延'
+              : '音源エラー'}
+        </span>
+        <span className="sr-only">{pianoSampleStatus.message}</span>
+      </span>
+    )}
     <button
       type="button"
       onClick={onToggleSustainLatch}
