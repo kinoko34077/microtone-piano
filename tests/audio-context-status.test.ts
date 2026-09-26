@@ -39,12 +39,12 @@ test('bounded performance-header component subscribes to status and retries from
     read('src/components/AudioContextStatusBadge.tsx'),
   ]);
 
-  assert.match(octaveBar, /AudioContextStatusBadge/);
+  assert.match(octaveBar, /actions && \([\s\S]*?<AudioContextStatusBadge \/>/);
   assert.match(component, /AudioContextStatus/);
   assert.match(component, /setAudioContextStatusCallback/);
   assert.match(component, /globalAudioEngine\.retryAudioContext\(\)/);
   assert.match(component, /status\.kind === 'failed'/);
-  assert.match(component, />再試行</);
+  assert.match(component, />\s*再試行\s*</);
   assert.match(component, /音声準備中/);
   assert.match(component, /音声準備済/);
   assert.match(component, /音声エラー/);
