@@ -7,6 +7,7 @@ type PcKeyPressState = {
   token: number;
   address: number;
   voiceId?: string;
+  cancelled?: boolean;
 };
 
 export class PcKeyPressRegistry {
@@ -27,8 +28,11 @@ export class PcKeyPressRegistry {
 
   resolve(key: string, token: number, voiceId: string): boolean {
     const current = this.presses.get(key);
-    if (!current || current.token !== token) {
+    if (!current || current.token !== token || current.cancelled) {
       this.stopVoice(voiceId);
+      if (current?.token === token) {
+        this.presses.delete(key);
+      }
       return false;
     }
 
@@ -43,22 +47,33 @@ export class PcKeyPressRegistry {
     }
     if (current.voiceId) {
       this.stopVoice(current.voiceId);
+      this.presses.delete(key);
+      return;
     }
-    this.presses.delete(key);
+    this.presses.set(key, {...current, cancelled: true});
+  }
+
+  abort(key: string, token: number): void {
+    const current = this.presses.get(key);
+    if (current?.token === token) {
+      this.presses.delete(key);
+    }
   }
 
   cancelAll(): void {
-    for (const current of this.presses.values()) {
+    for (const [key, current] of this.presses) {
       if (current.voiceId) {
         this.stopVoice(current.voiceId);
+        this.presses.delete(key);
+      } else {
+        this.presses.set(key, {...current, cancelled: true});
       }
     }
-    this.presses.clear();
   }
 
   getActive(key: string): ActivePcKeyPress | undefined {
     const current = this.presses.get(key);
-    if (!current?.voiceId) {
+    if (!current?.voiceId || current.cancelled) {
       return undefined;
     }
     return {voiceId: current.voiceId, address: current.address};
