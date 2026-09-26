@@ -1,5 +1,6 @@
 import React from 'react';
 import {MoveHorizontal, ZoomIn, ZoomOut} from 'lucide-react';
+import {AudioContextStatusBadge} from '../AudioContextStatusBadge';
 
 interface OctaveBarProps {
   label?: string;
@@ -103,7 +104,12 @@ export const OctaveBar: React.FC<OctaveBarProps> = ({
           <span className="w-10 text-right text-[10px] font-bold text-sky-300">{keyWidth}px</span>
         </div>
 
-        {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
+        {actions && (
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <AudioContextStatusBadge />
+            {actions}
+          </div>
+        )}
       </div>
     </div>
   );

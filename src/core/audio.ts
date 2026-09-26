@@ -9,6 +9,11 @@ export type PianoSampleStatus = {
   message: string;
 };
 
+export type AudioContextStatus = {
+  kind: 'starting' | 'ready' | 'failed';
+  message: string;
+};
+
 const MAX_PIANO_START_LATENCY_SECONDS = 0.08;
 const PIANO_PRELOAD_CONCURRENCY = 1;
 
@@ -44,6 +49,8 @@ export class AudioEngine {
   private sustainMomentary = false;
   private onOutOfRangeCallback?: (notice: OutOfRangeNotice) => void;
   private onPianoSampleStatusCallback?: (status: PianoSampleStatus | null) => void;
+  private onAudioContextStatusCallback?: (status: AudioContextStatus | null) => void;
+  private audioContextStatus: AudioContextStatus | null = null;
   private lastNoticeTimeByAddress: Map<number, number> = new Map();
 
   private get isSustainActive(): boolean {
@@ -51,21 +58,45 @@ export class AudioEngine {
   }
 
   public async ensureAudioContext(): Promise<AudioContext> {
-    if (!this.ctx) {
-      const AudioCtxClass =
-        window.AudioContext ||
-        (window as unknown as {webkitAudioContext: typeof AudioContext}).webkitAudioContext;
-      this.ctx = new AudioCtxClass();
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(this.savedMasterVolume, this.ctx.currentTime);
-      this.masterGain.connect(this.ctx.destination);
+    if (this.ctx?.state === 'running') {
+      this.emitAudioContextStatus({kind: 'ready', message: '音声を再生できます。'});
+      return this.ctx;
     }
 
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume();
-    }
+    this.emitAudioContextStatus({kind: 'starting', message: '音声を準備中です。'});
 
-    return this.ctx;
+    try {
+      if (!this.ctx || this.ctx.state === 'closed') {
+        const AudioCtxClass =
+          window.AudioContext ||
+          (window as unknown as {webkitAudioContext: typeof AudioContext}).webkitAudioContext;
+        this.ctx = new AudioCtxClass();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(this.savedMasterVolume, this.ctx.currentTime);
+        this.masterGain.connect(this.ctx.destination);
+      }
+
+      if (this.ctx.state === 'suspended') {
+        await this.ctx.resume();
+      }
+
+      if (this.ctx.state !== 'running') {
+        throw new Error(`AudioContext did not enter running state: ${this.ctx.state}`);
+      }
+
+      this.emitAudioContextStatus({kind: 'ready', message: '音声を再生できます。'});
+      return this.ctx;
+    } catch (error) {
+      this.emitAudioContextStatus({
+        kind: 'failed',
+        message: '音声を開始できませんでした。ブラウザの音声許可や出力先を確認して再試行してください。',
+      });
+      throw error;
+    }
+  }
+
+  public async retryAudioContext(): Promise<AudioContext> {
+    return this.ensureAudioContext();
   }
 
   public setSoundSource(source: SoundSourceType) {
@@ -110,6 +141,11 @@ export class AudioEngine {
 
   public setPianoSampleStatusCallback(cb: (status: PianoSampleStatus | null) => void) {
     this.onPianoSampleStatusCallback = cb;
+  }
+
+  public setAudioContextStatusCallback(cb: (status: AudioContextStatus | null) => void) {
+    this.onAudioContextStatusCallback = cb;
+    cb(this.audioContextStatus);
   }
 
   public async noteOn(
@@ -424,6 +460,11 @@ export class AudioEngine {
 
   private emitPianoSampleStatus(status: PianoSampleStatus | null) {
     this.onPianoSampleStatusCallback?.(status);
+  }
+
+  private emitAudioContextStatus(status: AudioContextStatus | null) {
+    this.audioContextStatus = status;
+    this.onAudioContextStatusCallback?.(status);
   }
 
   private async runPianoSamplePreload(): Promise<void> {
