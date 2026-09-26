@@ -1,0 +1,37 @@
+name: AudioContext status verify
+
+on:
+  pull_request:
+    paths:
+      - "src/App.tsx"
+      - "src/core/audio.ts"
+      - "tests/audio-context-status.test.ts"
+      - ".github/workflows/audio-context-status.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/App.tsx"
+      - "src/core/audio.ts"
+      - "tests/audio-context-status.test.ts"
+      - ".github/workflows/audio-context-status.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run AudioContext status regressions
+        run: npx tsx --test tests/audio-context-status.test.ts
+      - name: Typecheck
+        run: npm run lint
+      - name: Build
+        run: npm run build
