@@ -5,6 +5,14 @@ import {DebouncedSettingsSaver} from '../src/core/debouncedSettingsSaver';
 
 type Settings = {value: number};
 
+function section(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  assert.notEqual(startIndex, -1, `missing section start: ${start}`);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  assert.notEqual(endIndex, -1, `missing section end: ${end}`);
+  return source.slice(startIndex, endIndex);
+}
+
 test('schedule keeps only the latest settings and saves after the debounce fires', async () => {
   const saved: Settings[] = [];
   let scheduled: (() => void) | null = null;
@@ -76,10 +84,12 @@ test('App wires pagehide and unmount to flush without flushing on every settings
   assert.match(source, /window\.removeEventListener\('pagehide', flushPendingSettings\)/);
   assert.match(source, /settingsSaver\.flush\(\)/);
 
-  const debounceEffect = source.slice(
-    source.indexOf('settingsSaver.schedule(settings)'),
-    source.indexOf("window.addEventListener('pagehide'"),
+  const debounceEffect = section(
+    source,
+    'useEffect(() => {\n    if (!settingsReady)',
+    '}, [settings, settingsReady, settingsSaver]);',
   );
+  assert.match(debounceEffect, /settingsSaver\.schedule\(settings\)/);
   assert.doesNotMatch(
     debounceEffect,
     /settingsSaver\.flush\(\)/,
