@@ -34,12 +34,12 @@ test('retryAudioContext reuses the same initialization path', async () => {
 });
 
 test('bounded performance-header component subscribes to status and retries from a user gesture', async () => {
-  const [app, component] = await Promise.all([
-    read('src/App.tsx'),
+  const [octaveBar, component] = await Promise.all([
+    read('src/components/Keyboard/OctaveBar.tsx'),
     read('src/components/AudioContextStatusBadge.tsx'),
   ]);
 
-  assert.match(app, /AudioContextStatusBadge/);
+  assert.match(octaveBar, /AudioContextStatusBadge/);
   assert.match(component, /AudioContextStatus/);
   assert.match(component, /setAudioContextStatusCallback/);
   assert.match(component, /globalAudioEngine\.retryAudioContext\(\)/);
