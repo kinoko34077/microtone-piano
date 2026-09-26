@@ -4,6 +4,11 @@ import {isFrequencyOutOfRecommendedRange} from './pitch';
 
 type SoundSourceType = 'piano' | 'sawtooth' | 'square';
 
+export type PianoSampleStatus = {
+  kind: 'loading' | 'delayed' | 'error';
+  message: string;
+};
+
 const MAX_PIANO_START_LATENCY_SECONDS = 0.08;
 const PIANO_PRELOAD_CONCURRENCY = 1;
 
@@ -38,6 +43,7 @@ export class AudioEngine {
   private sustainLatch = false;
   private sustainMomentary = false;
   private onOutOfRangeCallback?: (notice: OutOfRangeNotice) => void;
+  private onPianoSampleStatusCallback?: (status: PianoSampleStatus | null) => void;
   private lastNoticeTimeByAddress: Map<number, number> = new Map();
 
   private get isSustainActive(): boolean {
@@ -66,6 +72,9 @@ export class AudioEngine {
     if (this.soundSource !== source) {
       this.allNotesOff();
       this.soundSource = source;
+      if (source !== 'piano') {
+        this.emitPianoSampleStatus(null);
+      }
     }
   }
 
@@ -97,6 +106,10 @@ export class AudioEngine {
 
   public setOutOfRangeNoticeCallback(cb: (notice: OutOfRangeNotice) => void) {
     this.onOutOfRangeCallback = cb;
+  }
+
+  public setPianoSampleStatusCallback(cb: (status: PianoSampleStatus | null) => void) {
+    this.onPianoSampleStatusCallback = cb;
   }
 
   public async noteOn(
@@ -360,23 +373,40 @@ export class AudioEngine {
   ): Promise<(Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}) | null> {
     const sample = findNearestPianoSample(frequency);
     if (!sample) {
+      this.emitPianoSampleStatus({
+        kind: 'error',
+        message: 'この音高に対応するピアノ音源が見つかりません。',
+      });
       return null;
     }
 
     let buffer = this.decodedSampleCache.get(sample.id);
     if (!buffer) {
+      this.emitPianoSampleStatus({
+        kind: 'loading',
+        message: 'ピアノ音源を準備中です。',
+      });
       try {
         buffer = await this.loadPianoSampleBuffer(sample);
       } catch {
+        this.emitPianoSampleStatus({
+          kind: 'error',
+          message: 'ピアノ音源を読み込めませんでした。通信状態を確認してもう一度お試しください。',
+        });
         return null;
       }
     }
 
     const elapsed = ctx.currentTime - now;
     if (elapsed > MAX_PIANO_START_LATENCY_SECONDS) {
+      this.emitPianoSampleStatus({
+        kind: 'delayed',
+        message: 'ピアノ音源の準備に時間がかかったため、遅れて鳴らさずこの入力は再生しませんでした。もう一度押すと再生できます。',
+      });
       return null;
     }
 
+    this.emitPianoSampleStatus(null);
     const startAt = Math.max(ctx.currentTime, now);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -390,6 +420,10 @@ export class AudioEngine {
       sourceNodes: [source],
       naturalDurationMs: Math.ceil((buffer.duration / Math.max(playbackRate, 0.001)) * 1000 + 50),
     };
+  }
+
+  private emitPianoSampleStatus(status: PianoSampleStatus | null) {
+    this.onPianoSampleStatusCallback?.(status);
   }
 
   private async runPianoSamplePreload(): Promise<void> {
