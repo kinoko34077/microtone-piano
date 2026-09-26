@@ -12,6 +12,7 @@ import {globalAudioEngine, PianoSampleStatus} from './core/audio';
 import {calculateFrequency, resolvePitch} from './core/pitch';
 import {keyToAddress} from './core/pcKeyboard';
 import {PcKeyPressRegistry} from './core/pcKeyPressRegistry';
+import {DebouncedSettingsSaver} from './core/debouncedSettingsSaver';
 import {getKeyboardColumnRange} from './core/keyboardRange';
 import {setPianoSampleOverrides} from './core/pianoSamples';
 import {Sidebar} from './components/Sidebar';
@@ -69,13 +70,21 @@ export default function App() {
   const [settingsReady, setSettingsReady] = useState(false);
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
   const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
-  const saveTimerRef = useRef<number | null>(null);
   const currentLayoutRef = useRef<LayoutPreset>(STANDARD_LAYOUT_12EDO);
   const currentTuningRef = useRef<TuningPreset>(STANDARD_TUNING_12EDO);
   const pcKeyRegistryRef = useRef<PcKeyPressRegistry | null>(null);
+  const settingsSaverRef = useRef<DebouncedSettingsSaver<AppSettings> | null>(null);
   const pcKeyRegistry =
     pcKeyRegistryRef.current ??
     (pcKeyRegistryRef.current = new PcKeyPressRegistry((voiceId) => globalAudioEngine.noteOff(voiceId)));
+  const settingsSaver =
+    settingsSaverRef.current ??
+    (settingsSaverRef.current = new DebouncedSettingsSaver<AppSettings>(
+      (value) => storageService.saveSettings(value),
+      (callback, delayMs) => window.setTimeout(callback, delayMs),
+      (timerId) => window.clearTimeout(timerId),
+      180,
+    ));
 
   const upperColumnRange = useMemo(
     () => getKeyboardColumnRange(currentLayout, currentTuning, 0),
@@ -159,21 +168,20 @@ export default function App() {
       return;
     }
 
-    if (saveTimerRef.current !== null) {
-      window.clearTimeout(saveTimerRef.current);
-    }
+    settingsSaver.schedule(settings);
+  }, [settings, settingsReady, settingsSaver]);
 
-    saveTimerRef.current = window.setTimeout(() => {
-      void storageService.saveSettings(settings);
-      saveTimerRef.current = null;
-    }, 180);
-
-    return () => {
-      if (saveTimerRef.current !== null) {
-        window.clearTimeout(saveTimerRef.current);
-      }
+  useEffect(() => {
+    const flushPendingSettings = () => {
+      settingsSaver.flush();
     };
-  }, [settings, settingsReady]);
+
+    window.addEventListener('pagehide', flushPendingSettings);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingSettings);
+      settingsSaver.flush();
+    };
+  }, [settingsSaver]);
 
   useEffect(() => {
     const nextUpper = Math.min(settings.upperScrollOffset ?? 0, upperMaxScrollOffset);
