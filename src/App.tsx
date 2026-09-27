@@ -430,6 +430,7 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         releasePcHeldNotes();
+        settingsSaver.flush();
       }
     };
 
@@ -444,7 +445,7 @@ export default function App() {
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [pcKeyRegistry, settings.pcDepthOffset]);
+  }, [pcKeyRegistry, settings.pcDepthOffset, settingsSaver]);
 
   const pressedAddressSet = useMemo(() => {
     const next = new Set<number>();

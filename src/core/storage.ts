@@ -36,10 +36,12 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pitchLabelMode: 'note',
 };
 
-class StorageService {
+export class StorageService {
   private dbPromise: Promise<IDBDatabase> | null = null;
+  private db: IDBDatabase | null = null;
 
   private initDB(): Promise<IDBDatabase> {
+    if (this.db) return Promise.resolve(this.db);
     if (this.dbPromise) return this.dbPromise;
 
     this.dbPromise = new Promise((resolve, reject) => {
@@ -58,8 +60,14 @@ class StorageService {
         }
       };
 
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        this.dbPromise = null;
+        reject(request.error);
+      };
     });
 
     return this.dbPromise;
@@ -174,8 +182,7 @@ class StorageService {
     }
   }
 
-  public async saveSettings(settings: AppSettings): Promise<void> {
-    const db = await this.initDB();
+  private writeSettings(db: IDBDatabase, settings: AppSettings): Promise<void> {
     const tx = db.transaction(STORE_SETTINGS, 'readwrite');
     const store = tx.objectStore(STORE_SETTINGS);
     store.put({ key: 'current_settings', value: settings });
@@ -183,6 +190,14 @@ class StorageService {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+  }
+
+  public saveSettings(settings: AppSettings): Promise<void> {
+    if (this.db) {
+      return this.writeSettings(this.db, settings);
+    }
+
+    return this.initDB().then((db) => this.writeSettings(db, settings));
   }
 
   // --- エクスポート/インポート ユーティリティ ---
