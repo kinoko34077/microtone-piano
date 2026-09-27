@@ -58,5 +58,5 @@
 
 ### Task 4: Record the implementation milestone
 
-- [ ] Commit the plan, regression test, implementation, and verification updates on `fix/issue-7-indexeddb-exit-durability`.
-- [ ] After commit, re-run the verification commands from the exact commit and record the SHA for the owner Issue/PR.
+- [x] Commit the plan, regression test, implementation, and verification updates on `fix/issue-7-indexeddb-exit-durability` (`f1aeaab37535eab9adf376e46f39f9d718e201ca`).
+- [x] After commit, re-run the verification commands from the exact commit: 17 tests passed, `tsc --noEmit` passed, Vite production build passed, and `git diff --check` passed.
