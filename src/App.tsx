@@ -25,6 +25,20 @@ type PressedPcKey = {
   address: number;
 };
 
+type PersistenceNotice = {
+  kind: 'read_failed' | 'save_failed';
+  message: string;
+  detail: string;
+};
+
+const SETTINGS_READ_FAILED_MESSAGE = '\u8a2d\u5b9a\u3092\u8aad\u307f\u8fbc\u3081\u307e\u305b\u3093\u3002\u81ea\u52d5\u4fdd\u5b58\u3092\u505c\u6b62\u3057\u3066\u3044\u307e\u3059\u3002';
+const SETTINGS_SAVE_FAILED_MESSAGE = '\u8a2d\u5b9a\u3092\u4fdd\u5b58\u3067\u304d\u307e\u305b\u3093\u3002\u518d\u8a66\u884c\u3067\u304d\u307e\u3059\u3002';
+const SETTINGS_RETRY_LABEL = '\u518d\u8a66\u884c';
+
+function persistenceErrorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? '');
+}
+
 const MAX_OCTAVE_OFFSET = 5;
 
 function clampOctaveOffset(value: number): number {
@@ -68,6 +82,7 @@ export default function App() {
   const [pianoSampleStatus, setPianoSampleStatus] = useState<PianoSampleStatus | null>(null);
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
   const [settingsReady, setSettingsReady] = useState(false);
+  const [persistenceNotice, setPersistenceNotice] = useState<PersistenceNotice | null>(null);
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
   const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
   const currentLayoutRef = useRef<LayoutPreset>(STANDARD_LAYOUT_12EDO);
@@ -84,7 +99,37 @@ export default function App() {
       (callback, delayMs) => window.setTimeout(callback, delayMs),
       (timerId) => window.clearTimeout(timerId),
       180,
+      (error) => setPersistenceNotice({
+        kind: 'save_failed',
+        message: SETTINGS_SAVE_FAILED_MESSAGE,
+        detail: persistenceErrorDetail(error),
+      }),
+      () => setPersistenceNotice((notice) => (notice?.kind === 'save_failed' ? null : notice)),
     ));
+
+  const applyLoadedSettings = useCallback(
+    (rawSettings: AppSettings, layouts: LayoutPreset[], tunings: TuningPreset[]) => {
+      const loadedSettings = normalizeSettings(rawSettings);
+      const initialLayout =
+        layouts.find((layout) => layout.id === loadedSettings.defaultLayoutPresetId) ?? STANDARD_LAYOUT_12EDO;
+      const initialTuning =
+        tunings.find((tuning) => tuning.id === loadedSettings.defaultPitchPresetId) ??
+        tunings.find((tuning) => tuning.id === initialLayout.defaultTuningId) ??
+        STANDARD_TUNING_12EDO;
+
+      setAllLayouts(layouts);
+      setAllTunings(tunings);
+      setCurrentLayout(initialLayout);
+      setCurrentTuning(initialTuning);
+      setSettings(loadedSettings);
+      globalAudioEngine.setSoundSource(loadedSettings.soundSource);
+      globalAudioEngine.setMasterVolume(loadedSettings.masterVolume);
+      globalAudioEngine.setNoteDecayMs(loadedSettings.noteDecayMs ?? 0);
+      globalAudioEngine.setSustain(loadedSettings.sustainLatch);
+      setPianoSampleOverrides(initialTuning, loadedSettings.pianoSampleOverrides);
+    },
+    [],
+  );
 
   const upperColumnRange = useMemo(
     () => getKeyboardColumnRange(currentLayout, currentTuning, 0),
@@ -121,30 +166,19 @@ export default function App() {
     const initData = async () => {
       const layouts = await storageService.getAllLayoutPresets();
       const tunings = await storageService.getAllTuningPresets();
-      const rawSettings = await storageService.getSettings();
-      const loadedSettings = normalizeSettings(rawSettings);
-      const initialLayout =
-        layouts.find((layout) => layout.id === loadedSettings.defaultLayoutPresetId) ?? STANDARD_LAYOUT_12EDO;
-      const initialTuning =
-        tunings.find((tuning) => tuning.id === loadedSettings.defaultPitchPresetId) ??
-        tunings.find((tuning) => tuning.id === initialLayout.defaultTuningId) ??
-        STANDARD_TUNING_12EDO;
+      const settingsResult = await storageService.loadSettings();
+      applyLoadedSettings(settingsResult.settings, layouts, tunings);
 
-      setAllLayouts(layouts);
-      setAllTunings(tunings);
-      setCurrentLayout(initialLayout);
-      setCurrentTuning(initialTuning);
-      setSettings(loadedSettings);
-
-      globalAudioEngine.setSoundSource(loadedSettings.soundSource);
-      globalAudioEngine.setMasterVolume(loadedSettings.masterVolume);
-      globalAudioEngine.setNoteDecayMs(loadedSettings.noteDecayMs ?? 0);
-      globalAudioEngine.setSustain(loadedSettings.sustainLatch);
-      setPianoSampleOverrides(initialTuning, loadedSettings.pianoSampleOverrides);
-      setSettingsReady(true);
-
-      if (JSON.stringify(loadedSettings) !== JSON.stringify(rawSettings)) {
-        void storageService.saveSettings(loadedSettings);
+      if (settingsResult.status === 'read_failed') {
+        setSettingsReady(false);
+        setPersistenceNotice({
+          kind: 'read_failed',
+          message: SETTINGS_READ_FAILED_MESSAGE,
+          detail: persistenceErrorDetail(settingsResult.error),
+        });
+      } else {
+        setPersistenceNotice(null);
+        setSettingsReady(true);
       }
     };
 
@@ -161,7 +195,8 @@ export default function App() {
       globalAudioEngine.setOutOfRangeNoticeCallback(() => {});
       globalAudioEngine.setPianoSampleStatusCallback(() => {});
     };
-  }, []);
+  }, [applyLoadedSettings]);
+
 
   useEffect(() => {
     if (!settingsReady) {
@@ -173,13 +208,13 @@ export default function App() {
 
   useEffect(() => {
     const flushPendingSettings = () => {
-      settingsSaver.flush();
+      settingsSaver.flushForLifecycle();
     };
 
     window.addEventListener('pagehide', flushPendingSettings);
     return () => {
       window.removeEventListener('pagehide', flushPendingSettings);
-      settingsSaver.flush();
+      settingsSaver.flushForLifecycle();
     };
   }, [settingsSaver]);
 
@@ -198,6 +233,28 @@ export default function App() {
       }),
     );
   }, [lowerMaxScrollOffset, settings.lowerScrollOffset, settings.upperScrollOffset, upperMaxScrollOffset]);
+
+  const onRetryPersistence = useCallback(async () => {
+    if (persistenceNotice?.kind === 'save_failed') {
+      settingsSaver.flush();
+      return;
+    }
+
+    const settingsResult = await storageService.loadSettings();
+    if (settingsResult.status === 'read_failed') {
+      setSettingsReady(false);
+      setPersistenceNotice({
+        kind: 'read_failed',
+        message: SETTINGS_READ_FAILED_MESSAGE,
+        detail: persistenceErrorDetail(settingsResult.error),
+      });
+      return;
+    }
+
+    applyLoadedSettings(settingsResult.settings, allLayouts, allTunings);
+    setPersistenceNotice(null);
+    setSettingsReady(true);
+  }, [allLayouts, allTunings, applyLoadedSettings, persistenceNotice?.kind, settingsSaver]);
 
   const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
     setSettings(normalizeSettings(newSettings));
@@ -430,7 +487,7 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         releasePcHeldNotes();
-        settingsSaver.flush();
+        settingsSaver.flushForLifecycle();
       }
     };
 
@@ -470,6 +527,22 @@ export default function App() {
 
   return (
     <div className="app-shell relative flex flex-col overflow-hidden bg-[#0d1117] font-sans text-slate-100">
+      {persistenceNotice && (
+        <div
+          role="alert"
+          className="absolute right-3 top-3 z-50 flex max-w-sm items-center gap-2 rounded border border-amber-500/60 bg-[#161b22] px-2.5 py-2 text-xs text-amber-100 shadow-lg"
+          title={persistenceNotice.detail}
+        >
+          <span>{persistenceNotice.message}</span>
+          <button
+            type="button"
+            onClick={() => void onRetryPersistence()}
+            className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-400/10"
+          >
+            {SETTINGS_RETRY_LABEL}
+          </button>
+        </div>
+      )}
       <Sidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
