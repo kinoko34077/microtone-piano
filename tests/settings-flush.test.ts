@@ -240,3 +240,57 @@ test('settings scheduled while a write is in flight are committed after the firs
 
   assert.deepEqual(attempts, [{value: 1}, {value: 2}]);
 });
+
+
+test('settings read failure is observable and distinct from an absent settings record', async () => {
+  const storageService = new StorageService();
+  const readError = new Error('temporary read failure');
+  const fakeDb = {
+    objectStoreNames: {contains: () => true},
+    transaction: () => ({
+      objectStore: () => ({
+        get: () => {
+          const request: {
+            result: unknown;
+            onsuccess: ((event: Event) => void) | null;
+            onerror: (() => void) | null;
+            error: Error;
+          } = {result: undefined, onsuccess: null, onerror: null, error: readError};
+          queueMicrotask(() => request.onerror?.());
+          return request;
+        },
+      }),
+    }),
+  };
+  const fakeIndexedDB = {
+    open: () => {
+      const request: {
+        result: typeof fakeDb;
+        onupgradeneeded: ((event: Event) => void) | null;
+        onsuccess: ((event: Event) => void) | null;
+        onerror: (() => void) | null;
+        error: Error | null;
+      } = {result: fakeDb, onupgradeneeded: null, onsuccess: null, onerror: null, error: null};
+      queueMicrotask(() => request.onsuccess?.({target: request} as unknown as Event));
+      return request;
+    },
+  } as unknown as IDBFactory;
+  const globalObject = globalThis as typeof globalThis & {indexedDB?: IDBFactory};
+  const previousIndexedDB = globalObject.indexedDB;
+  Object.defineProperty(globalObject, 'indexedDB', {configurable: true, value: fakeIndexedDB});
+
+  try {
+    const result = await (storageService as StorageService & {
+      loadSettings: () => Promise<{status: string; error?: unknown}>;
+    }).loadSettings();
+
+    assert.equal(result.status, 'read_failed');
+    assert.equal(result.error, readError);
+  } finally {
+    if (previousIndexedDB) {
+      Object.defineProperty(globalObject, 'indexedDB', {configurable: true, value: previousIndexedDB});
+    } else {
+      delete (globalObject as {indexedDB?: IDBFactory}).indexedDB;
+    }
+  }
+});
