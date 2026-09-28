@@ -6,6 +6,8 @@ export class DebouncedSettingsSaver<T> {
   private timerId: number | null = null;
   private latest: T | null = null;
   private pending = false;
+  private inFlight = false;
+  private generation = 0;
 
   constructor(
     private readonly save: SaveValue<T>,
@@ -17,6 +19,7 @@ export class DebouncedSettingsSaver<T> {
   schedule(value: T): void {
     this.latest = value;
     this.pending = true;
+    this.generation += 1;
 
     if (this.timerId !== null) {
       this.clearTimer(this.timerId);
@@ -42,12 +45,38 @@ export class DebouncedSettingsSaver<T> {
   }
 
   private commitPending(): void {
-    if (!this.pending || this.latest === null) {
+    if (this.inFlight || !this.pending || this.latest === null) {
       return;
     }
 
     const value = this.latest;
+    const generation = this.generation;
     this.pending = false;
-    void this.save(value);
+    this.inFlight = true;
+
+    let saveResult: Promise<void> | void;
+    try {
+      saveResult = this.save(value);
+    } catch {
+      this.inFlight = false;
+      this.pending = true;
+      return;
+    }
+
+    Promise.resolve(saveResult).then(
+      () => {
+        this.inFlight = false;
+        if (generation === this.generation) {
+          this.latest = null;
+        }
+        if (this.pending) {
+          this.commitPending();
+        }
+      },
+      () => {
+        this.inFlight = false;
+        this.pending = true;
+      },
+    );
   }
 }
