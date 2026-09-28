@@ -4,7 +4,7 @@
 
 **Goal:** Prevent uncertain IndexedDB reads and failed asynchronous writes from silently becoming a clean/default settings state.
 
-**Architecture:** Make settings startup reads return explicit authority states (`loaded`, `absent`, `read_failed`). Keep defaults usable in memory after `read_failed`, but hold autosave until an authoritative read succeeds. Model the debounced saver as a single in-flight writer whose latest revision remains pending until a write succeeds.
+**Architecture:** Make settings startup reads return explicit authority states (`loaded`, `absent`, `read_failed`). Keep defaults usable in memory after `read_failed`, but hold autosave until an authoritative read succeeds. Keep ordinary debounce/retry writes serialized, while lifecycle flush may synchronously start the newest revision even if an older write is still settling; revision fencing must keep the newest value as the eventual durable target.
 
 **Tech Stack:** TypeScript, React, IndexedDB, Node test runner via `tsx`, Vite.
 
@@ -16,7 +16,7 @@
 - Preserve Issue #7/#8 page lifecycle flush behavior.
 - Do not redesign tuning, audio, samples, keyboard layout, or PWA behavior.
 - A failed/read-uncertain startup may use defaults for UI continuity but must not treat them as authoritative persisted settings.
-- Failed saves must remain retryable; newer revisions supersede older revisions deterministically without overlapping writes.
+- Failed saves must remain retryable; ordinary writes stay serialized, while pagehide/hidden/unmount may start the newest revision immediately to preserve exit-time durability. Stale completions must never become the final durable authority.
 - Use only fake IndexedDB or an isolated temporary browser profile for failure/persistence verification.
 
 ## State Contract
@@ -25,7 +25,7 @@
 - `absent`: the settings store was read successfully and the record is absent; defaults may be initialized through the normal debounced save path.
 - `read_failed`: the persisted state is unknown; defaults may render, but autosave is disabled and a visible retry is required.
 - `save_failed`: the attempted revision remains pending and the visible retry flushes the same latest revision again.
-- In-flight supersession: while revision N is saving, revision N+1 may become pending but must not start a concurrent write; after N settles, the latest pending revision is attempted.
+- In-flight supersession: ordinary debounce/retry waits for the current write; lifecycle flush may start revision N+1 before N settles so its IndexedDB transaction begins while the page is active. Revision fencing/reassertion keeps N+1 as the eventual durable target even if completions arrive out of order.
 
 ## Verification
 
