@@ -36,6 +36,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pitchLabelMode: 'note',
 };
 
+export type SettingsLoadResult =
+  | {status: 'present'; settings: AppSettings}
+  | {status: 'absent'; settings: AppSettings}
+  | {status: 'read_failed'; error: unknown};
+
 export class StorageService {
   private dbPromise: Promise<IDBDatabase> | null = null;
   private db: IDBDatabase | null = null;
@@ -161,25 +166,33 @@ export class StorageService {
   }
 
   // --- 設定操作 ---
-  public async getSettings(): Promise<AppSettings> {
+  public async loadSettings(): Promise<SettingsLoadResult> {
     try {
       const db = await this.initDB();
       const tx = db.transaction(STORE_SETTINGS, 'readonly');
       const store = tx.objectStore(STORE_SETTINGS);
       const req = store.get('current_settings');
-      return new Promise((resolve) => {
+
+      return await new Promise<SettingsLoadResult>((resolve) => {
         req.onsuccess = () => {
           if (req.result && req.result.value) {
-            resolve({ ...DEFAULT_APP_SETTINGS, ...req.result.value });
+            resolve({status: 'present', settings: {...DEFAULT_APP_SETTINGS, ...req.result.value}});
           } else {
-            resolve(DEFAULT_APP_SETTINGS);
+            resolve({status: 'absent', settings: {...DEFAULT_APP_SETTINGS}});
           }
         };
-        req.onerror = () => resolve(DEFAULT_APP_SETTINGS);
+        req.onerror = () => {
+          resolve({status: 'read_failed', error: req.error ?? new Error('settings read failed')});
+        };
       });
-    } catch {
-      return DEFAULT_APP_SETTINGS;
+    } catch (error) {
+      return {status: 'read_failed', error};
     }
+  }
+
+  public async getSettings(): Promise<AppSettings> {
+    const result = await this.loadSettings();
+    return result.status === 'read_failed' ? {...DEFAULT_APP_SETTINGS} : result.settings;
   }
 
   private writeSettings(db: IDBDatabase, settings: AppSettings): Promise<void> {
