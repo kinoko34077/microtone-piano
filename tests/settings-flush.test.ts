@@ -178,3 +178,65 @@ test('App wires pagehide and unmount to flush without flushing on every settings
     'settings dependency cleanup must not flush every intermediate value and defeat debounce',
   );
 });
+
+
+test('failed settings writes remain pending and can be retried after rejection', async () => {
+  const attempts: Settings[] = [];
+  let rejectSave: ((error: Error) => void) | null = null;
+  const saver = new DebouncedSettingsSaver<Settings>(
+    (settings) => {
+      attempts.push(settings);
+      return new Promise<void>((_resolve, reject) => {
+        rejectSave = reject;
+      });
+    },
+    (callback) => {
+      callback();
+      return 1;
+    },
+    () => undefined,
+    180,
+  );
+
+  saver.schedule({value: 10});
+  await Promise.resolve();
+  assert.deepEqual(attempts, [{value: 10}]);
+
+  rejectSave?.(new Error('temporary write failure'));
+  await Promise.resolve();
+
+  saver.flush();
+  await Promise.resolve();
+  assert.deepEqual(attempts, [{value: 10}, {value: 10}], 'a rejected write must remain retryable');
+});
+
+test('settings scheduled while a write is in flight are committed after the first write succeeds', async () => {
+  const attempts: Settings[] = [];
+  let resolveFirst: (() => void) | null = null;
+  const saver = new DebouncedSettingsSaver<Settings>(
+    (settings) => {
+      attempts.push(settings);
+      if (settings.value === 1) {
+        return new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return Promise.resolve();
+    },
+    (callback) => {
+      callback();
+      return 1;
+    },
+    () => undefined,
+    180,
+  );
+
+  saver.schedule({value: 1});
+  await Promise.resolve();
+  saver.schedule({value: 2});
+  resolveFirst?.();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(attempts, [{value: 1}, {value: 2}]);
+});
