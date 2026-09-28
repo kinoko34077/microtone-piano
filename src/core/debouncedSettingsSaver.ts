@@ -8,7 +8,7 @@ export class DebouncedSettingsSaver<T> {
   private timerId: number | null = null;
   private latest: T | null = null;
   private pending = false;
-  private inFlight = false;
+  private readonly inFlightRevisions = new Set<number>();
   private revision = 0;
 
   constructor(
@@ -36,6 +36,18 @@ export class DebouncedSettingsSaver<T> {
   }
 
   flush(): void {
+    this.flushPending(false);
+  }
+
+  flushForLifecycle(): void {
+    this.flushPending(true);
+  }
+
+  hasPending(): boolean {
+    return this.pending;
+  }
+
+  private flushPending(allowConcurrent: boolean): void {
     if (!this.pending) return;
 
     if (this.timerId !== null) {
@@ -43,19 +55,18 @@ export class DebouncedSettingsSaver<T> {
       this.timerId = null;
     }
 
-    this.commitPending();
+    this.commitPending(allowConcurrent);
   }
 
-  hasPending(): boolean {
-    return this.pending;
-  }
+  private commitPending(allowConcurrent = false): void {
+    if (!this.pending || this.latest === null) return;
 
-  private commitPending(): void {
-    if (!this.pending || this.latest === null || this.inFlight) return;
+    const revision = this.revision;
+    if (this.inFlightRevisions.has(revision)) return;
+    if (!allowConcurrent && this.inFlightRevisions.size > 0) return;
 
     const value = this.latest;
-    const revision = this.revision;
-    this.inFlight = true;
+    this.inFlightRevisions.add(revision);
 
     let saveResult: Promise<void> | void;
     try {
@@ -66,26 +77,41 @@ export class DebouncedSettingsSaver<T> {
     }
 
     void Promise.resolve(saveResult).then(
-      () => {
-        this.inFlight = false;
-        if (this.revision === revision) {
-          this.pending = false;
-        }
-        this.onSaved();
-        if (this.pending && this.revision !== revision) {
-          this.commitPending();
-        }
-      },
+      () => this.finishSuccess(revision),
       (error) => this.finishFailure(error, revision),
     );
   }
 
-  private finishFailure(error: unknown, revision: number): void {
-    this.inFlight = false;
-    this.pending = true;
-    this.onError(error);
-    if (this.revision !== revision) {
-      this.commitPending();
+  private finishSuccess(revision: number): void {
+    this.inFlightRevisions.delete(revision);
+    if (this.revision === revision) {
+      this.pending = false;
+      this.onSaved();
+      return;
     }
+
+    if (!this.pending && !this.inFlightRevisions.has(this.revision)) {
+      this.pending = true;
+      this.commitPending();
+      return;
+    }
+
+    this.commitLatestAfterStaleSettlement();
+  }
+
+  private finishFailure(error: unknown, revision: number): void {
+    this.inFlightRevisions.delete(revision);
+    if (this.revision === revision) {
+      this.pending = true;
+      this.onError(error);
+      return;
+    }
+
+    this.commitLatestAfterStaleSettlement();
+  }
+
+  private commitLatestAfterStaleSettlement(): void {
+    if (!this.pending || this.inFlightRevisions.has(this.revision)) return;
+    this.commitPending();
   }
 }

@@ -208,13 +208,13 @@ export default function App() {
 
   useEffect(() => {
     const flushPendingSettings = () => {
-      settingsSaver.flush();
+      settingsSaver.flushForLifecycle();
     };
 
     window.addEventListener('pagehide', flushPendingSettings);
     return () => {
       window.removeEventListener('pagehide', flushPendingSettings);
-      settingsSaver.flush();
+      settingsSaver.flushForLifecycle();
     };
   }, [settingsSaver]);
 
@@ -487,7 +487,7 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         releasePcHeldNotes();
-        settingsSaver.flush();
+        settingsSaver.flushForLifecycle();
       }
     };
 

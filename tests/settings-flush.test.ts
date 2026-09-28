@@ -160,11 +160,11 @@ test('App wires pagehide and unmount to flush without flushing on every settings
   assert.match(source, /settingsSaver\.schedule\(settings\)/);
   assert.match(source, /window\.addEventListener\('pagehide', flushPendingSettings\)/);
   assert.match(source, /window\.removeEventListener\('pagehide', flushPendingSettings\)/);
-  assert.match(source, /settingsSaver\.flush\(\)/);
+  assert.match(source, /settingsSaver\.flushForLifecycle\(\)/);
 
   const visibilityHandler = section(source, 'const handleVisibilityChange = () => {', '    window.addEventListener');
   assert.match(visibilityHandler, /document\.hidden/);
-  assert.match(visibilityHandler, /settingsSaver\.flush\(\)/);
+  assert.match(visibilityHandler, /settingsSaver\.flushForLifecycle\(\)/);
 
   const debounceEffect = section(
     source,
@@ -174,7 +174,7 @@ test('App wires pagehide and unmount to flush without flushing on every settings
   assert.match(debounceEffect, /settingsSaver\.schedule\(settings\)/);
   assert.doesNotMatch(
     debounceEffect,
-    /settingsSaver\.flush\(\)/,
+    /settingsSaver\.flush(?:ForLifecycle)?\(\)/,
     'settings dependency cleanup must not flush every intermediate value and defeat debounce',
   );
 });
@@ -282,6 +282,51 @@ test('newer settings scheduled during an in-flight save become the eventual dura
   resolvers.shift()?.();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(saver.hasPending(), false);
+});
+
+test('lifecycle flush starts the latest revision before an older save settles and fences stale completion', async () => {
+  const attempts: Settings[] = [];
+  const resolvers: Array<() => void> = [];
+  let scheduled: (() => void) | null = null;
+  let savedSignals = 0;
+  const saver = new DebouncedSettingsSaver<Settings>(
+    (value) => {
+      attempts.push(value);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    },
+    (callback) => ((scheduled = callback), 1),
+    () => {},
+    180,
+    () => {},
+    () => {
+      savedSignals += 1;
+    },
+  );
+
+  saver.schedule({value: 1});
+  scheduled?.();
+  await Promise.resolve();
+  saver.schedule({value: 2});
+  saver.flushForLifecycle();
+
+  assert.deepEqual(attempts, [{value: 1}, {value: 2}]);
+  assert.equal(saver.hasPending(), true);
+
+  resolvers[1]?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(saver.hasPending(), false);
+  assert.equal(savedSignals, 1);
+
+  resolvers[0]?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(saver.hasPending(), true);
+  assert.equal(savedSignals, 1, 'stale completion must not be treated as the latest save');
+  assert.deepEqual(attempts, [{value: 1}, {value: 2}, {value: 2}]);
+
+  resolvers[2]?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(saver.hasPending(), false);
+  assert.equal(savedSignals, 2);
 });
 
 test('App keeps autosave disabled after uncertain settings load and exposes bounded retry UI', async () => {
