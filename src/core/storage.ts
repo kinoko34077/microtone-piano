@@ -13,6 +13,11 @@ const STORE_TUNINGS = 'tuningPresets';
 const STORE_SETTINGS = 'appSettings';
 
 // 初期アプリケーション設定
+export type SettingsLoadResult =
+  | {status: 'loaded'; settings: AppSettings}
+  | {status: 'absent'; settings: AppSettings}
+  | {status: 'read_failed'; settings: AppSettings; error: unknown};
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   soundSource: 'piano',
   masterVolume: 0.8,
@@ -161,7 +166,7 @@ export class StorageService {
   }
 
   // --- 設定操作 ---
-  public async getSettings(): Promise<AppSettings> {
+  public async loadSettings(): Promise<SettingsLoadResult> {
     try {
       const db = await this.initDB();
       const tx = db.transaction(STORE_SETTINGS, 'readonly');
@@ -170,16 +175,28 @@ export class StorageService {
       return new Promise((resolve) => {
         req.onsuccess = () => {
           if (req.result && req.result.value) {
-            resolve({ ...DEFAULT_APP_SETTINGS, ...req.result.value });
+            resolve({
+              status: 'loaded',
+              settings: {...DEFAULT_APP_SETTINGS, ...req.result.value},
+            });
           } else {
-            resolve(DEFAULT_APP_SETTINGS);
+            resolve({status: 'absent', settings: {...DEFAULT_APP_SETTINGS}});
           }
         };
-        req.onerror = () => resolve(DEFAULT_APP_SETTINGS);
+        req.onerror = () =>
+          resolve({
+            status: 'read_failed',
+            settings: {...DEFAULT_APP_SETTINGS},
+            error: req.error ?? new Error('Settings read failed'),
+          });
       });
-    } catch {
-      return DEFAULT_APP_SETTINGS;
+    } catch (error) {
+      return {status: 'read_failed', settings: {...DEFAULT_APP_SETTINGS}, error};
     }
+  }
+
+  public async getSettings(): Promise<AppSettings> {
+    return (await this.loadSettings()).settings;
   }
 
   private writeSettings(db: IDBDatabase, settings: AppSettings): Promise<void> {

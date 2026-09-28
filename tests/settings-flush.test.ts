@@ -178,3 +178,117 @@ test('App wires pagehide and unmount to flush without flushing on every settings
     'settings dependency cleanup must not flush every intermediate value and defeat debounce',
   );
 });
+
+
+test('settings load distinguishes authoritative absence from read failure', async () => {
+  const install = (outcome: 'absent' | 'error') => {
+    const fakeDb = {
+      objectStoreNames: {contains: () => true},
+      transaction: () => ({
+        objectStore: () => ({
+          get: () => {
+            const request: any = {result: undefined, error: null, onsuccess: null, onerror: null};
+            queueMicrotask(() => {
+              if (outcome === 'error') {
+                request.error = new Error('temporary read failure');
+                request.onerror?.();
+              } else {
+                request.onsuccess?.();
+              }
+            });
+            return request;
+          },
+        }),
+      }),
+    } as unknown as IDBDatabase;
+    return {
+      open: () => {
+        const request: any = {result: fakeDb, error: null, onsuccess: null, onerror: null, onupgradeneeded: null};
+        queueMicrotask(() => request.onsuccess?.());
+        return request;
+      },
+    } as unknown as IDBFactory;
+  };
+  const globalObject = globalThis as typeof globalThis & {indexedDB?: IDBFactory};
+  const previousIndexedDB = globalObject.indexedDB;
+  try {
+    Object.defineProperty(globalObject, 'indexedDB', {configurable: true, value: install('absent')});
+    const absent = await new StorageService().loadSettings();
+    assert.equal(absent.status, 'absent');
+    assert.deepEqual(absent.settings, DEFAULT_APP_SETTINGS);
+
+    Object.defineProperty(globalObject, 'indexedDB', {configurable: true, value: install('error')});
+    const failed = await new StorageService().loadSettings();
+    assert.equal(failed.status, 'read_failed');
+    assert.deepEqual(failed.settings, DEFAULT_APP_SETTINGS);
+    assert.match(String(failed.error), /temporary read failure/);
+  } finally {
+    if (previousIndexedDB) Object.defineProperty(globalObject, 'indexedDB', {configurable: true, value: previousIndexedDB});
+    else delete (globalObject as {indexedDB?: IDBFactory}).indexedDB;
+  }
+});
+
+test('rejected save stays pending and flush retries the same latest value', async () => {
+  const attempts: Settings[] = [];
+  let scheduled: (() => void) | null = null;
+  let fail = true;
+  const saver = new DebouncedSettingsSaver<Settings>(
+    async (value) => {
+      attempts.push(value);
+      if (fail) {
+        fail = false;
+        throw new Error('write failed');
+      }
+    },
+    (callback) => ((scheduled = callback), 1),
+    () => {},
+    180,
+  );
+  saver.schedule({value: 7});
+  scheduled?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(saver.hasPending(), true);
+
+  saver.flush();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(attempts, [{value: 7}, {value: 7}]);
+  assert.equal(saver.hasPending(), false);
+});
+
+test('newer settings scheduled during an in-flight save become the eventual durable target', async () => {
+  const attempts: Settings[] = [];
+  const resolvers: Array<() => void> = [];
+  let scheduled: (() => void) | null = null;
+  const saver = new DebouncedSettingsSaver<Settings>(
+    (value) => {
+      attempts.push(value);
+      return new Promise<void>((resolve) => resolvers.push(resolve));
+    },
+    (callback) => ((scheduled = callback), 1),
+    () => {},
+    180,
+  );
+
+  saver.schedule({value: 1});
+  scheduled?.();
+  await Promise.resolve();
+  saver.schedule({value: 2});
+  saver.flush();
+  assert.deepEqual(attempts, [{value: 1}]);
+
+  resolvers.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(attempts, [{value: 1}, {value: 2}]);
+  resolvers.shift()?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(saver.hasPending(), false);
+});
+
+test('App keeps autosave disabled after uncertain settings load and exposes bounded retry UI', async () => {
+  const source = (await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  assert.match(source, /storageService\.loadSettings\(\)/);
+  assert.match(source, /status === 'read_failed'/);
+  assert.match(source, /settingsReady/);
+  assert.match(source, /onRetryPersistence/);
+  assert.match(source, /role="alert"/);
+});
