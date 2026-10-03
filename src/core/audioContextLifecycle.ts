@@ -8,7 +8,7 @@ export async function resumeAudioContextForPlayback(
   context: AudioContext,
 ): Promise<RuntimeAudioContextState> {
   const initialState = getRuntimeAudioContextState(context);
-  if (initialState === 'suspended') {
+  if (initialState === 'suspended' || initialState === 'interrupted') {
     await context.resume();
   }
 
