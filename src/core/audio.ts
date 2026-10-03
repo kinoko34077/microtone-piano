@@ -1,5 +1,6 @@
 import {ActiveVoice, OutOfRangeNotice} from '../types/keyboard';
 import {findNearestPianoSample, getActivePianoSamples, PianoSampleDefinition} from './pianoSamples';
+import {getRuntimeAudioContextState, resumeAudioContextForPlayback} from './audioContextLifecycle';
 import {isFrequencyOutOfRecommendedRange} from './pitch';
 
 type SoundSourceType = 'piano' | 'sawtooth' | 'square';
@@ -58,7 +59,7 @@ export class AudioEngine {
   }
 
   public async ensureAudioContext(): Promise<AudioContext> {
-    if (this.ctx?.state === 'running') {
+    if (this.ctx && getRuntimeAudioContextState(this.ctx) === 'running') {
       this.emitAudioContextStatus({kind: 'ready', message: '音声を再生できます。'});
       return this.ctx;
     }
@@ -66,7 +67,7 @@ export class AudioEngine {
     this.emitAudioContextStatus({kind: 'starting', message: '音声を準備中です。'});
 
     try {
-      if (!this.ctx || this.ctx.state === 'closed') {
+      if (!this.ctx || getRuntimeAudioContextState(this.ctx) === 'closed') {
         const AudioCtxClass =
           window.AudioContext ||
           (window as unknown as {webkitAudioContext: typeof AudioContext}).webkitAudioContext;
@@ -76,13 +77,7 @@ export class AudioEngine {
         this.masterGain.connect(this.ctx.destination);
       }
 
-      if (this.ctx.state === 'suspended') {
-        await this.ctx.resume();
-      }
-
-      if (this.ctx.state !== 'running') {
-        throw new Error(`AudioContext did not enter running state: ${this.ctx.state}`);
-      }
+      await resumeAudioContextForPlayback(this.ctx);
 
       this.emitAudioContextStatus({kind: 'ready', message: '音声を再生できます。'});
       return this.ctx;
