@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {AudioContextStatus, AudioEngine} from '../src/core/audio';
 
 const read = (path: string) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -10,6 +11,26 @@ function section(source: string, start: string, end: string): string {
   const endIndex = source.indexOf(end, startIndex + start.length);
   assert.notEqual(endIndex, -1, `missing section end: ${end}`);
   return source.slice(startIndex, endIndex);
+}
+
+type RuntimeAudioState = AudioContextState | 'interrupted';
+
+function installExistingContext(
+  engine: AudioEngine,
+  initialState: RuntimeAudioState,
+  resume: () => Promise<void>,
+) {
+  const context = {
+    state: initialState,
+    resumeCalls: 0,
+    async resume() {
+      context.resumeCalls += 1;
+      await resume();
+    },
+  };
+
+  (engine as unknown as {ctx: AudioContext | null}).ctx = context as unknown as AudioContext;
+  return context;
 }
 
 test('AudioEngine exposes starting ready and failed context states around ensureAudioContext', async () => {
@@ -24,6 +45,38 @@ test('AudioEngine exposes starting ready and failed context states around ensure
   assert.match(ensure, /try \{/);
   assert.match(ensure, /catch \(error\)/);
   assert.match(ensure, /throw error/);
+});
+
+test('interrupted AudioContext is resumed instead of rejected before playback', async () => {
+  const engine = new AudioEngine();
+  const statuses: Array<AudioContextStatus | null> = [];
+  let context: ReturnType<typeof installExistingContext>;
+
+  context = installExistingContext(engine, 'interrupted', async () => {
+    context.state = 'running';
+  });
+  engine.setAudioContextStatusCallback((status) => statuses.push(status));
+
+  const resolved = await engine.ensureAudioContext();
+
+  assert.equal(resolved, context as unknown as AudioContext);
+  assert.equal(context.resumeCalls, 1);
+  assert.equal(context.state, 'running');
+  assert.equal(statuses.at(-1)?.kind, 'ready');
+});
+
+test('resume rejection remains a bounded failed AudioContext state', async () => {
+  const engine = new AudioEngine();
+  const statuses: Array<AudioContextStatus | null> = [];
+  const context = installExistingContext(engine, 'suspended', async () => {
+    throw new Error('resume blocked');
+  });
+  engine.setAudioContextStatusCallback((status) => statuses.push(status));
+
+  await assert.rejects(engine.ensureAudioContext(), /resume blocked/);
+
+  assert.equal(context.resumeCalls, 1);
+  assert.equal(statuses.at(-1)?.kind, 'failed');
 });
 
 test('retryAudioContext reuses the same initialization path', async () => {
