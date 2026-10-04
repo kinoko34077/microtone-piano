@@ -1,0 +1,40 @@
+name: Preset import validation
+
+on:
+  pull_request:
+    paths:
+      - "src/core/presetValidation.ts"
+      - "src/core/storage.ts"
+      - "src/components/Sidebar.tsx"
+      - "tests/preset-import-validation.test.ts"
+      - ".github/workflows/preset-import-validation.yml"
+  push:
+    branches:
+      - main
+      - "fix/13-preset-import-validation"
+    paths:
+      - "src/core/presetValidation.ts"
+      - "src/core/storage.ts"
+      - "src/components/Sidebar.tsx"
+      - "tests/preset-import-validation.test.ts"
+      - ".github/workflows/preset-import-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run preset import validation regressions
+        run: npx tsx --test tests/preset-import-validation.test.ts
+      - name: Typecheck
+        run: npm run lint
+      - name: Build
+        run: npm run build
