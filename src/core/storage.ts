@@ -4,6 +4,7 @@
 
 import { LayoutPreset, TuningPreset, AppSettings } from '../types/keyboard';
 import { ALL_STANDARD_LAYOUTS, ALL_STANDARD_TUNINGS } from './presets';
+import {validateLayoutPresetData, validateTuningPresetData} from './presetValidation';
 
 const DB_NAME = 'MultiMicrotonalKeyboardDB';
 const DB_VERSION = 1;
@@ -101,6 +102,10 @@ export class StorageService {
   }
 
   public async saveLayoutPreset(preset: LayoutPreset): Promise<void> {
+    const validation = validateLayoutPresetData(preset);
+    if ('error' in validation) {
+      throw new Error(`配置プリセットを保存できません: ${validation.error}`);
+    }
     const db = await this.initDB();
     const tx = db.transaction(STORE_LAYOUTS, 'readwrite');
     const store = tx.objectStore(STORE_LAYOUTS);
@@ -133,6 +138,10 @@ export class StorageService {
   }
 
   public async saveTuningPreset(preset: TuningPreset): Promise<void> {
+    const validation = validateTuningPresetData(preset);
+    if ('error' in validation) {
+      throw new Error(`音高プリセットを保存できません: ${validation.error}`);
+    }
     const db = await this.initDB();
     const tx = db.transaction(STORE_TUNINGS, 'readwrite');
     const store = tx.objectStore(STORE_TUNINGS);
@@ -293,22 +302,15 @@ export class StorageService {
   /**
    * 配置プリセットの構造整合性検証
    */
-  public validateLayoutPreset(data: any): data is LayoutPreset {
-    if (!data || typeof data !== 'object') return false;
-    if (typeof data.id !== 'string' || typeof data.name !== 'string') return false;
-    if (!Array.isArray(data.lanes) || data.lanes.length !== 32) return false;
-    if (!Array.isArray(data.mapping) || data.mapping.length !== 256) return false;
-    return true;
+  public validateLayoutPreset(data: unknown): data is LayoutPreset {
+    return validateLayoutPresetData(data).ok;
   }
 
   /**
    * 音高プリセットの構造整合性検証
    */
-  public validateTuningPreset(data: any): data is TuningPreset {
-    if (!data || typeof data !== 'object') return false;
-    if (typeof data.id !== 'string' || typeof data.name !== 'string') return false;
-    if (!Array.isArray(data.pitches)) return false;
-    return true;
+  public validateTuningPreset(data: unknown): data is TuningPreset {
+    return validateTuningPresetData(data).ok;
   }
 }
 

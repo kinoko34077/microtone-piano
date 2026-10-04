@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import {LayoutPreset, TuningPreset, AppSettings, OutOfRangeNotice} from '../types/keyboard';
 import {storageService} from '../core/storage';
+import {validatePresetImport} from '../core/presetValidation';
 import {globalAudioEngine} from '../core/audio';
 
 interface SidebarProps {
@@ -134,21 +135,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
 
     try {
-      const data = (await storageService.importFromFile(file)) as any;
-      if (data?.layoutPreset) {
-        onSelectLayout(data.layoutPreset);
-        if (data.tuningPreset) {
-          onSelectTuning(data.tuningPreset);
-        }
-      } else if (data?.lanes && data?.mapping) {
-        onSelectLayout(data);
-      } else if (data?.pitches) {
-        onSelectTuning(data);
-      } else {
-        window.alert('読み込める形式ではありません。');
+      const data = await storageService.importFromFile(file);
+      const admission = validatePresetImport(data, currentTuning);
+      if ('error' in admission) {
+        window.alert(`読み込みに失敗しました: ${admission.error}`);
+        return;
       }
-    } catch (error: any) {
-      window.alert(`読み込みに失敗しました: ${error.message}`);
+
+      if (admission.kind === 'package') {
+        // Validate the complete package before either callback mutates active state.
+        onSelectLayout(admission.layout);
+        if (admission.tuning) {
+          onSelectTuning(admission.tuning);
+        }
+      } else if (admission.kind === 'layout') {
+        onSelectLayout(admission.layout);
+      } else {
+        onSelectTuning(admission.tuning);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '不明なエラー';
+      window.alert(`読み込みに失敗しました: ${message}`);
     }
 
     if (fileInputRef.current) {
