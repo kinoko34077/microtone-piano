@@ -5,6 +5,8 @@ import {
   STANDARD_LAYOUT_12EDO,
   STANDARD_TUNING_12EDO,
 } from '../src/core/presets';
+import {AudioEngine} from '../src/core/audio';
+import {calculateFrequency, isValidFrequencyValue} from '../src/core/pitch';
 import {
   validateLayoutPresetData,
   validatePresetImport,
@@ -43,7 +45,7 @@ test('tuning validation rejects malformed and duplicate pitch identity', () => {
   assert.equal(validateTuningPresetData(duplicate).ok, false);
 });
 
-test('tuning validation enforces finite type-specific domains without deciding #14 zero-Hz semantics', () => {
+test('tuning validation enforces finite type-specific domains including positive explicit frequency', () => {
   const badEdo = clone(STANDARD_TUNING_12EDO);
   badEdo.pitches[0] = {...badEdo.pitches[0], edo: 0};
   assert.equal(validateTuningPresetData(badEdo).ok, false);
@@ -65,7 +67,41 @@ test('tuning validation enforces finite type-specific domains without deciding #
     type: 'frequency',
     frequency: 0,
   };
-  assert.equal(validateTuningPresetData(zeroFrequency).ok, true);
+  assert.equal(validateTuningPresetData(zeroFrequency).ok, false);
+
+  const positiveFrequency = clone(STANDARD_TUNING_12EDO);
+  positiveFrequency.pitches[0] = {
+    id: 0,
+    name: 'positive',
+    type: 'frequency',
+    frequency: 0.5,
+  };
+  assert.equal(validateTuningPresetData(positiveFrequency).ok, true);
+});
+
+test('zero-Hz frequency is not aliased to base frequency and is rejected before audio startup', async () => {
+  const zeroPitch = {
+    id: 0,
+    name: 'zero',
+    type: 'frequency' as const,
+    frequency: 0,
+  };
+
+  assert.equal(isValidFrequencyValue(0), false);
+  assert.equal(isValidFrequencyValue(Number.POSITIVE_INFINITY), false);
+  assert.equal(isValidFrequencyValue(0.5), true);
+  assert.equal(calculateFrequency(zeroPitch, STANDARD_TUNING_12EDO), 0);
+
+  const engine = new AudioEngine();
+  let noticeMessage = '';
+  engine.setOutOfRangeNoticeCallback((notice) => {
+    noticeMessage = notice.message;
+  });
+
+  const voiceId = await engine.noteOn(0, zeroPitch.id, 0);
+  assert.match(voiceId, /^invalid_/);
+  assert.match(noticeMessage, /0より大きい有限値/);
+  assert.deepEqual(engine.getActiveVoices(), []);
 });
 
 test('layout validation rejects invalid lanes, boundaries, and mapping scalars', () => {
