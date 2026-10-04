@@ -59,9 +59,9 @@ function validateBoundaries(
 function validateBoundaryTemplateMap(
   value: unknown,
   field: string,
-  *,
-  required: boolean,
+  options: {required: boolean},
 ): ValidationResult {
+  const {required} = options;
   if (value === undefined && !required) {
     return {ok: true};
   }
