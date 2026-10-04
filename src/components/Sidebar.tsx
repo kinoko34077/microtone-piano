@@ -137,7 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     try {
       const data = await storageService.importFromFile(file);
       const admission = validatePresetImport(data, currentTuning);
-      if (!admission.ok) {
+      if ('error' in admission) {
         window.alert(`読み込みに失敗しました: ${admission.error}`);
         return;
       }
