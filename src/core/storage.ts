@@ -103,7 +103,7 @@ export class StorageService {
 
   public async saveLayoutPreset(preset: LayoutPreset): Promise<void> {
     const validation = validateLayoutPresetData(preset);
-    if (!validation.ok) {
+    if ('error' in validation) {
       throw new Error(`配置プリセットを保存できません: ${validation.error}`);
     }
     const db = await this.initDB();
@@ -139,7 +139,7 @@ export class StorageService {
 
   public async saveTuningPreset(preset: TuningPreset): Promise<void> {
     const validation = validateTuningPresetData(preset);
-    if (!validation.ok) {
+    if ('error' in validation) {
       throw new Error(`音高プリセットを保存できません: ${validation.error}`);
     }
     const db = await this.initDB();
