@@ -289,14 +289,14 @@ export function validatePresetImport(
     }
 
     const layoutResult = validateLayoutPresetData(data.layoutPreset);
-    if (!layoutResult.ok) {
+    if ('error' in layoutResult) {
       return {ok: false, error: `配置プリセットが不正です: ${layoutResult.error}`};
     }
 
     let tuning: TuningPreset | undefined;
     if ('tuningPreset' in data && data.tuningPreset !== undefined) {
       const tuningResult = validateTuningPresetData(data.tuningPreset);
-      if (!tuningResult.ok) {
+      if ('error' in tuningResult) {
         return {ok: false, error: `音高プリセットが不正です: ${tuningResult.error}`};
       }
       tuning = data.tuningPreset as TuningPreset;
@@ -304,7 +304,7 @@ export function validatePresetImport(
 
     const layout = data.layoutPreset as LayoutPreset;
     const compatibility = validateLayoutForTuning(layout, tuning ?? activeTuning);
-    if (!compatibility.ok) {
+    if ('error' in compatibility) {
       return {ok: false, error: `配置と音高の組合せが不正です: ${compatibility.error}`};
     }
     return {ok: true, kind: 'package', layout, tuning};
@@ -312,12 +312,12 @@ export function validatePresetImport(
 
   if ('lanes' in data || 'mapping' in data) {
     const layoutResult = validateLayoutPresetData(data);
-    if (!layoutResult.ok) {
+    if ('error' in layoutResult) {
       return {ok: false, error: `配置プリセットが不正です: ${layoutResult.error}`};
     }
     const layout = data as unknown as LayoutPreset;
     const compatibility = validateLayoutForTuning(layout, activeTuning);
-    if (!compatibility.ok) {
+    if ('error' in compatibility) {
       return {ok: false, error: `配置と現在の音高の組合せが不正です: ${compatibility.error}`};
     }
     return {ok: true, kind: 'layout', layout};
@@ -325,7 +325,7 @@ export function validatePresetImport(
 
   if ('pitches' in data) {
     const tuningResult = validateTuningPresetData(data);
-    if (!tuningResult.ok) {
+    if ('error' in tuningResult) {
       return {ok: false, error: `音高プリセットが不正です: ${tuningResult.error}`};
     }
     return {ok: true, kind: 'tuning', tuning: data as unknown as TuningPreset};
