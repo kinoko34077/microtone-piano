@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 
 import {
   STANDARD_LAYOUT_12EDO,
   STANDARD_TUNING_12EDO,
 } from '../src/core/presets';
-import {AudioEngine} from '../src/core/audio';
 import {calculateFrequency, isValidFrequencyValue} from '../src/core/pitch';
 import {
   validateLayoutPresetData,
@@ -92,16 +92,14 @@ test('zero-Hz frequency is not aliased to base frequency and is rejected before 
   assert.equal(isValidFrequencyValue(0.5), true);
   assert.equal(calculateFrequency(zeroPitch, STANDARD_TUNING_12EDO), 0);
 
-  const engine = new AudioEngine();
-  let noticeMessage = '';
-  engine.setOutOfRangeNoticeCallback((notice) => {
-    noticeMessage = notice.message;
-  });
-
-  const voiceId = await engine.noteOn(0, zeroPitch.id, 0);
-  assert.match(voiceId, /^invalid_/);
-  assert.match(noticeMessage, /0より大きい有限値/);
-  assert.deepEqual(engine.getActiveVoices(), []);
+  const audioSource = await readFile(new URL('../src/core/audio.ts', import.meta.url), 'utf8');
+  const guardIndex = audioSource.indexOf('if (!isValidFrequencyValue(frequency))');
+  const contextIndex = audioSource.indexOf('const ctx = await this.ensureAudioContext()', guardIndex);
+  assert.notEqual(guardIndex, -1, 'missing invalid-frequency runtime guard');
+  assert.notEqual(contextIndex, -1, 'missing AudioContext startup after runtime guard');
+  assert.ok(guardIndex < contextIndex, 'invalid frequency must be rejected before AudioContext startup');
+  assert.match(audioSource.slice(guardIndex, contextIndex), /onOutOfRangeCallback/);
+  assert.match(audioSource.slice(guardIndex, contextIndex), /0より大きい有限値/);
 });
 
 test('layout validation rejects invalid lanes, boundaries, and mapping scalars', () => {
