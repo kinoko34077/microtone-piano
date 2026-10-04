@@ -2,6 +2,10 @@ import {PitchDefinition, PitchLabelMode, TuningPreset} from '../types/keyboard';
 
 export const PITCH_REFERENCE_STRIDE = 256;
 
+export function isValidFrequencyValue(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
 const NOTE_NAMES_12 = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const DOREMI_NAMES_12 = ['ド', 'ド#', 'レ', 'レ#', 'ミ', 'ファ', 'ファ#', 'ソ', 'ソ#', 'ラ', 'ラ#', 'シ'];
 
@@ -72,7 +76,7 @@ export function calculateFrequency(
       freq = baseFreq * ((pitch.numerator || 1) / (pitch.denominator || 1));
       break;
     case 'frequency':
-      freq = pitch.frequency || baseFreq;
+      freq = pitch.frequency ?? baseFreq;
       break;
     default:
       freq = baseFreq;

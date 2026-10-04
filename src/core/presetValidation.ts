@@ -1,5 +1,5 @@
 import {LayoutPreset, PitchDefinition, TuningPreset} from '../types/keyboard';
-import {resolvePitch} from './pitch';
+import {isValidFrequencyValue, resolvePitch} from './pitch';
 
 export type ValidationResult =
   | {ok: true}
@@ -119,10 +119,8 @@ function validatePitch(pitch: unknown, index: number): ValidationResult {
       }
       break;
     case 'frequency':
-      // #14 owns the product meaning of an explicit 0 Hz pitch.
-      // This admission repair preserves the editor's existing >= 0 domain.
-      if (!isFiniteNumber(pitch.frequency) || pitch.frequency < 0) {
-        return fail(`pitches[${index}].frequency must be finite and >= 0`);
+      if (!isValidFrequencyValue(pitch.frequency)) {
+        return fail(`pitches[${index}].frequency must be finite and > 0`);
       }
       break;
   }

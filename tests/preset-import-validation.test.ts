@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 
 import {
   STANDARD_LAYOUT_12EDO,
   STANDARD_TUNING_12EDO,
 } from '../src/core/presets';
+import {calculateFrequency, isValidFrequencyValue} from '../src/core/pitch';
 import {
   validateLayoutPresetData,
   validatePresetImport,
@@ -43,7 +45,7 @@ test('tuning validation rejects malformed and duplicate pitch identity', () => {
   assert.equal(validateTuningPresetData(duplicate).ok, false);
 });
 
-test('tuning validation enforces finite type-specific domains without deciding #14 zero-Hz semantics', () => {
+test('tuning validation enforces finite type-specific domains including positive explicit frequency', () => {
   const badEdo = clone(STANDARD_TUNING_12EDO);
   badEdo.pitches[0] = {...badEdo.pitches[0], edo: 0};
   assert.equal(validateTuningPresetData(badEdo).ok, false);
@@ -65,7 +67,39 @@ test('tuning validation enforces finite type-specific domains without deciding #
     type: 'frequency',
     frequency: 0,
   };
-  assert.equal(validateTuningPresetData(zeroFrequency).ok, true);
+  assert.equal(validateTuningPresetData(zeroFrequency).ok, false);
+
+  const positiveFrequency = clone(STANDARD_TUNING_12EDO);
+  positiveFrequency.pitches[0] = {
+    id: 0,
+    name: 'positive',
+    type: 'frequency',
+    frequency: 0.5,
+  };
+  assert.equal(validateTuningPresetData(positiveFrequency).ok, true);
+});
+
+test('zero-Hz frequency is not aliased to base frequency and is rejected before audio startup', async () => {
+  const zeroPitch = {
+    id: 0,
+    name: 'zero',
+    type: 'frequency' as const,
+    frequency: 0,
+  };
+
+  assert.equal(isValidFrequencyValue(0), false);
+  assert.equal(isValidFrequencyValue(Number.POSITIVE_INFINITY), false);
+  assert.equal(isValidFrequencyValue(0.5), true);
+  assert.equal(calculateFrequency(zeroPitch, STANDARD_TUNING_12EDO), 0);
+
+  const audioSource = await readFile(new URL('../src/core/audio.ts', import.meta.url), 'utf8');
+  const guardIndex = audioSource.indexOf('if (!isValidFrequencyValue(frequency))');
+  const contextIndex = audioSource.indexOf('const ctx = await this.ensureAudioContext()', guardIndex);
+  assert.notEqual(guardIndex, -1, 'missing invalid-frequency runtime guard');
+  assert.notEqual(contextIndex, -1, 'missing AudioContext startup after runtime guard');
+  assert.ok(guardIndex < contextIndex, 'invalid frequency must be rejected before AudioContext startup');
+  assert.match(audioSource.slice(guardIndex, contextIndex), /onOutOfRangeCallback/);
+  assert.match(audioSource.slice(guardIndex, contextIndex), /0より大きい有限値/);
 });
 
 test('layout validation rejects invalid lanes, boundaries, and mapping scalars', () => {

@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "src/core/presetValidation.ts"
+      - "src/core/pitch.ts"
+      - "src/core/audio.ts"
+      - "src/components/Editor/PresetEditor.tsx"
       - "src/core/storage.ts"
       - "src/components/Sidebar.tsx"
       - "tests/preset-import-validation.test.ts"
@@ -12,8 +15,12 @@ on:
     branches:
       - main
       - "fix/13-preset-import-validation"
+      - "fix/14-frequency-zero-contract"
     paths:
       - "src/core/presetValidation.ts"
+      - "src/core/pitch.ts"
+      - "src/core/audio.ts"
+      - "src/components/Editor/PresetEditor.tsx"
       - "src/core/storage.ts"
       - "src/components/Sidebar.tsx"
       - "tests/preset-import-validation.test.ts"

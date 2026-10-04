@@ -1,7 +1,7 @@
 import {ActiveVoice, OutOfRangeNotice} from '../types/keyboard';
 import {findNearestPianoSample, getActivePianoSamples, PianoSampleDefinition} from './pianoSamples';
 import {getRuntimeAudioContextState, resumeAudioContextForPlayback} from './audioContextLifecycle';
-import {isFrequencyOutOfRecommendedRange} from './pitch';
+import {isFrequencyOutOfRecommendedRange, isValidFrequencyValue} from './pitch';
 
 type SoundSourceType = 'piano' | 'sawtooth' | 'square';
 
@@ -150,6 +150,18 @@ export class AudioEngine {
     velocity: number = 1.0,
     pointerId?: number | string
   ): Promise<string> {
+    if (!isValidFrequencyValue(frequency)) {
+      const timestamp = Date.now();
+      this.onOutOfRangeCallback?.({
+        id: `invalid_${address}_${timestamp}`,
+        frequency,
+        address,
+        message: `再生できない周波数です (${Number.isFinite(frequency) ? `${frequency} Hz` : '非有限値'})。0より大きい有限値を指定してください。`,
+        timestamp,
+      });
+      return `invalid_${address}_${pitchId}_${pointerId ?? 'mouse'}_${timestamp}`;
+    }
+
     const ctx = await this.ensureAudioContext();
     const now = ctx.currentTime;
 

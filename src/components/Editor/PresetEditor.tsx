@@ -20,6 +20,7 @@ import {
   encodePitchReference,
   formatFrequency,
   getPitchLabel,
+  isValidFrequencyValue,
   resolvePitch,
 } from '../../core/pitch';
 import {applyAutoMapping} from '../../core/mapping';
@@ -1170,7 +1171,11 @@ function renderPitchValueEditor(pitch: PitchDefinition, onUpdatePitch: (pitch: P
     <BlurCommitNumberInput
       value={pitch.frequency ?? 440}
       step={0.01}
-      onCommit={(value) => onUpdatePitch({...pitch, frequency: Math.max(0, value)})}
+      onCommit={(value) => {
+        if (isValidFrequencyValue(value)) {
+          onUpdatePitch({...pitch, frequency: value});
+        }
+      }}
       className="w-28 rounded-md border border-[#344457] bg-[#0a0f16] px-2 py-1 text-sm outline-none focus:border-sky-500"
     />
   );
