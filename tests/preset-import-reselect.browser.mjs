@@ -34,7 +34,6 @@ test("#21 invalid JSON can be selected repeatedly in real Chromium",async()=>{
     assert.ok(input,"Preset import input must be present");
     for(let attempt=1;attempt<=2;attempt++){
       await input.uploadFile(file);
-      await page.waitForFunction(count=>window.__testDialogCount===count,{timeout:1000},attempt).catch(()=>{});
       for(let i=0;i<40&&dialogs<attempt;i++)await new Promise(resolve=>setTimeout(resolve,50));
       assert.equal(dialogs,attempt,"Same invalid file must be independently processed on each selection");
       const state=await page.evaluate(()=>{
