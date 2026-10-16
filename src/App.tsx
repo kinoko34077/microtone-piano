@@ -236,8 +236,22 @@ export default function App() {
       return;
     }
 
-    settingsSaver.schedule(settings);
-  }, [settings, settingsReady, settingsSaver]);
+    // Persist only preset identities confirmed in IndexedDB. Other setting
+    // changes remain savable while a newly duplicated preset is pending.
+    const layoutId = settings.defaultLayoutPresetId;
+    const tuningId = settings.defaultPitchPresetId;
+    const durableLayoutId = layoutId && confirmedLayoutIds.current.has(layoutId)
+      ? layoutId : persistedDefaultLayout.current;
+    const durableTuningId = tuningId && confirmedTuningIds.current.has(tuningId)
+      ? tuningId : persistedDefaultTuning.current;
+    persistedDefaultLayout.current = durableLayoutId;
+    persistedDefaultTuning.current = durableTuningId;
+    settingsSaver.schedule({
+      ...settings,
+      defaultLayoutPresetId: durableLayoutId,
+      defaultPitchPresetId: durableTuningId,
+    });
+  }, [settings, settingsReady, settingsSaver, presetReceiptRevision]);
 
   useEffect(() => {
     const flushPendingSettings = () => {
