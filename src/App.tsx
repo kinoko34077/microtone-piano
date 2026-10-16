@@ -331,11 +331,12 @@ export default function App() {
     setPcPressedMap(new Map());
   }, [pcKeyRegistry]);
 
-  const persistPreset = useCallback((kind: 'layout' | 'tuning', value: LayoutPreset | TuningPreset) => {
+  const persistPreset = useCallback((kind: 'layout' | 'tuning', value: LayoutPreset | TuningPreset, retry = false) => {
     const key = kind + ':' + value.id;
     const revision = (presetWriteRevision.current.get(key) ?? 0) + 1;
     presetWriteRevision.current.set(key, revision);
-    setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
+    // During retry, retain the unresolved error until the DB confirms success.
+    if (!retry) setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
     if (presetReadBlockedRef.current) {
       setPresetSaveFailures((previous) => [...previous, {
         key, kind, value, detail: '既存プリセットの読込失敗中は保存しません。先に読込を再試行してください。',
@@ -671,7 +672,7 @@ export default function App() {
           title={presetSaveFailures.map((item) => item.detail).join(' / ')}>
           <span>プリセット{presetSaveFailures.length}件を保存できませんでした。編集内容は残っています。</span>
           <button type="button" onClick={() => {
-            for (const failure of presetSaveFailures) persistPreset(failure.kind, failure.value);
+            for (const failure of presetSaveFailures) persistPreset(failure.kind, failure.value, true);
           }} className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-xs font-semibold">
             保存を再試行
           </button>
