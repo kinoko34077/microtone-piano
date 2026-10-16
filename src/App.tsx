@@ -346,8 +346,18 @@ export default function App() {
       ? storageService.saveLayoutPreset(value as LayoutPreset)
       : storageService.saveTuningPreset(value as TuningPreset);
     void result.then(() => {
-      if (presetWriteRevision.current.get(key) === revision)
-        setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
+      if (presetWriteRevision.current.get(key) !== revision) return;
+      if (kind === 'layout') {
+        confirmedLayoutIds.current.add(value.id);
+        setAllLayouts((previous) => previous.map((item) =>
+          item.id === value.id ? value as LayoutPreset : item));
+      } else {
+        confirmedTuningIds.current.add(value.id);
+        setAllTunings((previous) => previous.map((item) =>
+          item.id === value.id ? value as TuningPreset : item));
+      }
+      setPresetReceiptRevision((previous) => previous + 1);
+      setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
     }).catch((error: unknown) => {
       if (presetWriteRevision.current.get(key) !== revision) return;
       setPresetSaveFailures((previous) => [
@@ -376,8 +386,11 @@ export default function App() {
       const ids = new Set(tunings.presets.map((item) => item.id));
       return [...tunings.presets, ...previous.filter((item) => !item.isStandard && !ids.has(item.id))];
     });
+    confirmedLayoutIds.current = new Set(layouts.presets.map((item) => item.id));
+    confirmedTuningIds.current = new Set(tunings.presets.map((item) => item.id));
     presetReadBlockedRef.current = false;
     setPresetReadFailure(null);
+    setPresetReceiptRevision((previous) => previous + 1);
     if (settingsResult.status !== 'read_failed') {
       setSettingsReady(true);
       setPersistenceNotice((previous) => previous?.kind === 'read_failed' ? null : previous);
