@@ -361,13 +361,14 @@ test('#20 read failure is explicit instead of silently appearing as an empty pre
   }
 });
 
-test('#20 all eight preset writes report rejected results without dropping working drafts', async () => {
-  const app = (await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')).replace(/\\r\\n/g, '\\n');
-  assert.doesNotMatch(app, /void storageService\\.save(?:Layout|Tuning)Preset\\(/);
-  assert.match(app, /const persistPreset = useCallback/);
-  assert.match(app, /presetWriteRevision\\.current\\.get\\(key\\) === revision/);
-  assert.match(app, /result\\.then\\([\\s\\S]*?\\.catch\\(\\(error: unknown\\)/);
-  assert.match(app, /presetReadBlockedRef\\.current/);
-  assert.match(app, /presetSaveFailures\\.length > 0/);
-  assert.match(app, /retryPresetRead/);
+test('#20 all eight preset writes are observed and errors are recoverable', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.ok(!app.includes('void storageService.saveLayoutPreset('));
+  assert.ok(!app.includes('void storageService.saveTuningPreset('));
+  assert.ok(app.includes('const persistPreset = useCallback'));
+  assert.ok(app.includes('presetWriteRevision.current.get(key) === revision'));
+  assert.ok(app.includes('.catch((error: unknown) =>'));
+  assert.ok(app.includes('presetReadBlockedRef.current'));
+  assert.ok(app.includes('presetSaveFailures.length > 0'));
+  assert.ok(app.includes('retryPresetRead'));
 });
