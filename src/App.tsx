@@ -572,6 +572,18 @@ export default function App() {
           </button>
         </div>
       )}
+      {presetSaveFailures.length > 0 && (
+        <div role="alert"
+          className="fixed bottom-3 right-3 z-[60] flex max-w-sm items-center gap-2 rounded border border-amber-500/60 bg-[#161b22] px-3 py-2 text-xs text-amber-100 shadow-lg"
+          title={presetSaveFailures.map((item) => item.detail).join(' / ')}>
+          <span>プリセット{presetSaveFailures.length}件を保存できませんでした。編集内容は残っています。</span>
+          <button type="button" onClick={() => {
+            for (const failure of presetSaveFailures) persistPreset(failure.kind, failure.value);
+          }} className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-xs font-semibold">
+            保存を再試行
+          </button>
+        </div>
+      )}
       <Sidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
