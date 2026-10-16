@@ -39,6 +39,13 @@ function persistenceErrorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? '');
 }
 
+type PresetSaveFailure = {
+  key: string;
+  kind: 'layout' | 'tuning';
+  value: LayoutPreset | TuningPreset;
+  detail: string;
+};
+
 const MAX_OCTAVE_OFFSET = 5;
 
 function clampOctaveOffset(value: number): number {
@@ -83,6 +90,15 @@ export default function App() {
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
   const [settingsReady, setSettingsReady] = useState(false);
   const [persistenceNotice, setPersistenceNotice] = useState<PersistenceNotice | null>(null);
+  const [presetSaveFailures, setPresetSaveFailures] = useState<PresetSaveFailure[]>([]);
+  const [presetReadFailure, setPresetReadFailure] = useState<string | null>(null);
+  const presetReadBlockedRef = useRef(false);
+  const presetWriteRevision = useRef(new Map<string, number>());
+  const confirmedLayoutIds = useRef(new Set(ALL_STANDARD_LAYOUTS.map((item) => item.id)));
+  const confirmedTuningIds = useRef(new Set(ALL_STANDARD_TUNINGS.map((item) => item.id)));
+  const persistedDefaultLayout = useRef(STANDARD_LAYOUT_12EDO.id);
+  const persistedDefaultTuning = useRef(STANDARD_TUNING_12EDO.id);
+  const [presetReceiptRevision, setPresetReceiptRevision] = useState(0);
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
   const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
   const currentLayoutRef = useRef<LayoutPreset>(STANDARD_LAYOUT_12EDO);
@@ -164,10 +180,27 @@ export default function App() {
 
   useEffect(() => {
     const initData = async () => {
-      const layouts = await storageService.getAllLayoutPresets();
-      const tunings = await storageService.getAllTuningPresets();
-      const settingsResult = await storageService.loadSettings();
-      applyLoadedSettings(settingsResult.settings, layouts, tunings);
+      const [layoutLoad, tuningLoad, settingsResult] = await Promise.all([
+        storageService.loadLayoutPresets(),
+        storageService.loadTuningPresets(),
+        storageService.loadSettings(),
+      ]);
+      const presetReadFailed = layoutLoad.status === 'read_failed' || tuningLoad.status === 'read_failed';
+      presetReadBlockedRef.current = presetReadFailed;
+      if (!presetReadFailed) {
+        confirmedLayoutIds.current = new Set(layoutLoad.presets.map((item) => item.id));
+        confirmedTuningIds.current = new Set(tuningLoad.presets.map((item) => item.id));
+        if (settingsResult.settings.defaultLayoutPresetId &&
+            confirmedLayoutIds.current.has(settingsResult.settings.defaultLayoutPresetId))
+          persistedDefaultLayout.current = settingsResult.settings.defaultLayoutPresetId;
+        if (settingsResult.settings.defaultPitchPresetId &&
+            confirmedTuningIds.current.has(settingsResult.settings.defaultPitchPresetId))
+          persistedDefaultTuning.current = settingsResult.settings.defaultPitchPresetId;
+      }
+      if (presetReadFailed) setPresetReadFailure(
+        'プリセットを読み込めませんでした。上書きを防止しています。再試行してください。'
+      );
+      applyLoadedSettings(settingsResult.settings, layoutLoad.presets, tuningLoad.presets);
 
       if (settingsResult.status === 'read_failed') {
         setSettingsReady(false);
@@ -178,7 +211,7 @@ export default function App() {
         });
       } else {
         setPersistenceNotice(null);
-        setSettingsReady(true);
+        setSettingsReady(!presetReadFailed);
       }
     };
 
@@ -203,8 +236,22 @@ export default function App() {
       return;
     }
 
-    settingsSaver.schedule(settings);
-  }, [settings, settingsReady, settingsSaver]);
+    // Persist only preset identities confirmed in IndexedDB. Other setting
+    // changes remain savable while a newly duplicated preset is pending.
+    const layoutId = settings.defaultLayoutPresetId;
+    const tuningId = settings.defaultPitchPresetId;
+    const durableLayoutId = layoutId && confirmedLayoutIds.current.has(layoutId)
+      ? layoutId : persistedDefaultLayout.current;
+    const durableTuningId = tuningId && confirmedTuningIds.current.has(tuningId)
+      ? tuningId : persistedDefaultTuning.current;
+    persistedDefaultLayout.current = durableLayoutId;
+    persistedDefaultTuning.current = durableTuningId;
+    settingsSaver.schedule({
+      ...settings,
+      defaultLayoutPresetId: durableLayoutId,
+      defaultPitchPresetId: durableTuningId,
+    });
+  }, [settings, settingsReady, settingsSaver, presetReceiptRevision]);
 
   useEffect(() => {
     const flushPendingSettings = () => {
@@ -251,6 +298,13 @@ export default function App() {
       return;
     }
 
+    // A settings-only retry must not unblock writes while preset DB reads
+    // remain unverified: doing so can persist fallback IDs over existing data.
+    if (presetReadBlockedRef.current) {
+      setPersistenceNotice(null);
+      setSettingsReady(false);
+      return;
+    }
     applyLoadedSettings(settingsResult.settings, allLayouts, allTunings);
     setPersistenceNotice(null);
     setSettingsReady(true);
@@ -284,6 +338,74 @@ export default function App() {
     setPcPressedMap(new Map());
   }, [pcKeyRegistry]);
 
+  const persistPreset = useCallback((kind: 'layout' | 'tuning', value: LayoutPreset | TuningPreset, retry = false) => {
+    const key = kind + ':' + value.id;
+    const revision = (presetWriteRevision.current.get(key) ?? 0) + 1;
+    presetWriteRevision.current.set(key, revision);
+    // During retry, retain the unresolved error until the DB confirms success.
+    if (!retry) setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
+    if (presetReadBlockedRef.current) {
+      setPresetSaveFailures((previous) => [
+        ...previous.filter((item) => item.key !== key),
+        {key, kind, value, detail: '既存プリセットの読込失敗中は保存しません。先に読込を再試行してください。'},
+      ]);
+      return;
+    }
+    const result = kind === 'layout'
+      ? storageService.saveLayoutPreset(value as LayoutPreset)
+      : storageService.saveTuningPreset(value as TuningPreset);
+    void result.then(() => {
+      if (presetWriteRevision.current.get(key) !== revision) return;
+      if (kind === 'layout') {
+        confirmedLayoutIds.current.add(value.id);
+        setAllLayouts((previous) => previous.map((item) =>
+          item.id === value.id ? value as LayoutPreset : item));
+      } else {
+        confirmedTuningIds.current.add(value.id);
+        setAllTunings((previous) => previous.map((item) =>
+          item.id === value.id ? value as TuningPreset : item));
+      }
+      setPresetReceiptRevision((previous) => previous + 1);
+      setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
+    }).catch((error: unknown) => {
+      if (presetWriteRevision.current.get(key) !== revision) return;
+      setPresetSaveFailures((previous) => [
+        ...previous.filter((item) => item.key !== key),
+        {key, kind, value, detail: persistenceErrorDetail(error)},
+      ]);
+    });
+  }, []);
+
+  const retryPresetRead = useCallback(async () => {
+    const [layouts, tunings, settingsResult] = await Promise.all([
+      storageService.loadLayoutPresets(),
+      storageService.loadTuningPresets(),
+      storageService.loadSettings(),
+    ]);
+    if (layouts.status === 'read_failed' || tunings.status === 'read_failed') {
+      setPresetReadFailure('プリセットをまだ読み込めません。現在の編集内容は保持しています。');
+      return;
+    }
+    // Incorporate recovered storage without replacing in-progress local drafts.
+    setAllLayouts((previous) => {
+      const ids = new Set(layouts.presets.map((item) => item.id));
+      return [...layouts.presets, ...previous.filter((item) => !item.isStandard && !ids.has(item.id))];
+    });
+    setAllTunings((previous) => {
+      const ids = new Set(tunings.presets.map((item) => item.id));
+      return [...tunings.presets, ...previous.filter((item) => !item.isStandard && !ids.has(item.id))];
+    });
+    confirmedLayoutIds.current = new Set(layouts.presets.map((item) => item.id));
+    confirmedTuningIds.current = new Set(tunings.presets.map((item) => item.id));
+    presetReadBlockedRef.current = false;
+    setPresetReadFailure(null);
+    setPresetReceiptRevision((previous) => previous + 1);
+    if (settingsResult.status !== 'read_failed') {
+      setSettingsReady(true);
+      setPersistenceNotice((previous) => previous?.kind === 'read_failed' ? null : previous);
+    }
+  }, []);
+
   const handleDuplicateLayout = useCallback(() => {
     const duplicate: LayoutPreset = {
       ...currentLayout,
@@ -294,8 +416,8 @@ export default function App() {
     setAllLayouts((prev) => [...prev, duplicate]);
     setCurrentLayout(duplicate);
     setSettings((prev) => normalizeSettings({...prev, defaultLayoutPresetId: duplicate.id}));
-    void storageService.saveLayoutPreset(duplicate);
-  }, [currentLayout]);
+    persistPreset('layout', duplicate);
+  }, [currentLayout, persistPreset]);
 
   const handleDuplicateTuning = useCallback(() => {
     const duplicate: TuningPreset = {
@@ -307,24 +429,24 @@ export default function App() {
     setAllTunings((prev) => [...prev, duplicate]);
     setCurrentTuning(duplicate);
     setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: duplicate.id}));
-    void storageService.saveTuningPreset(duplicate);
-  }, [currentTuning]);
+    persistPreset('tuning', duplicate);
+  }, [currentTuning, persistPreset]);
 
   const handleSaveLayout = useCallback(() => {
     if (currentLayout.isStandard) {
       handleDuplicateLayout();
       return;
     }
-    void storageService.saveLayoutPreset(currentLayout);
-  }, [currentLayout, handleDuplicateLayout]);
+    persistPreset('layout', currentLayout);
+  }, [currentLayout, handleDuplicateLayout, persistPreset]);
 
   const handleSaveTuning = useCallback(() => {
     if (currentTuning.isStandard) {
       handleDuplicateTuning();
       return;
     }
-    void storageService.saveTuningPreset(currentTuning);
-  }, [currentTuning, handleDuplicateTuning]);
+    persistPreset('tuning', currentTuning);
+  }, [currentTuning, handleDuplicateTuning, persistPreset]);
 
   const handleSelectLayout = useCallback(
     (layout: LayoutPreset) => {
@@ -367,14 +489,14 @@ export default function App() {
       setAllLayouts((prev) => [...prev, duplicate]);
       setCurrentLayout(duplicate);
       setSettings((prev) => normalizeSettings({...prev, defaultLayoutPresetId: duplicate.id}));
-      void storageService.saveLayoutPreset(duplicate);
+      persistPreset('layout', duplicate);
       return;
     }
 
     setCurrentLayout(newLayout);
     setAllLayouts((prev) => prev.map((layout) => (layout.id === newLayout.id ? newLayout : layout)));
-    void storageService.saveLayoutPreset(newLayout);
-  }, []);
+    persistPreset('layout', newLayout);
+  }, [persistPreset]);
 
   const handleUpdateTuning = useCallback((newTuning: TuningPreset) => {
     if (newTuning.isStandard) {
@@ -387,14 +509,14 @@ export default function App() {
       setAllTunings((prev) => [...prev, duplicate]);
       setCurrentTuning(duplicate);
       setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: duplicate.id}));
-      void storageService.saveTuningPreset(duplicate);
+      persistPreset('tuning', duplicate);
       return;
     }
 
     setCurrentTuning(newTuning);
     setAllTunings((prev) => prev.map((tuning) => (tuning.id === newTuning.id ? newTuning : tuning)));
-    void storageService.saveTuningPreset(newTuning);
-  }, []);
+    persistPreset('tuning', newTuning);
+  }, [persistPreset]);
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) =>
@@ -540,6 +662,27 @@ export default function App() {
             className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-400/10"
           >
             {SETTINGS_RETRY_LABEL}
+          </button>
+        </div>
+      )}
+      {presetReadFailure && (
+        <div role="alert" className="fixed bottom-20 right-3 z-[60] flex max-w-sm items-center gap-2 rounded border border-amber-500/60 bg-[#161b22] px-3 py-2 text-xs text-amber-100 shadow-lg">
+          <span>{presetReadFailure}</span>
+          <button type="button" onClick={() => void retryPresetRead()}
+            className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-xs font-semibold">
+            読込を再試行
+          </button>
+        </div>
+      )}
+      {presetSaveFailures.length > 0 && (
+        <div role="alert"
+          className="fixed bottom-3 right-3 z-[60] flex max-w-sm items-center gap-2 rounded border border-amber-500/60 bg-[#161b22] px-3 py-2 text-xs text-amber-100 shadow-lg"
+          title={presetSaveFailures.map((item) => item.detail).join(' / ')}>
+          <span>プリセット{presetSaveFailures.length}件を保存できませんでした。編集内容は残っています。</span>
+          <button type="button" onClick={() => {
+            for (const failure of presetSaveFailures) persistPreset(failure.kind, failure.value, true);
+          }} className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-xs font-semibold">
+            保存を再試行
           </button>
         </div>
       )}

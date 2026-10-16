@@ -157,7 +157,7 @@ test('App wires pagehide and unmount to flush without flushing on every settings
   const source = (await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
   assert.match(source, /DebouncedSettingsSaver/);
-  assert.match(source, /settingsSaver\.schedule\(settings\)/);
+  assert.ok(source.includes('settingsSaver.schedule({'));
   assert.match(source, /window\.addEventListener\('pagehide', flushPendingSettings\)/);
   assert.match(source, /window\.removeEventListener\('pagehide', flushPendingSettings\)/);
   assert.match(source, /settingsSaver\.flushForLifecycle\(\)/);
@@ -169,9 +169,9 @@ test('App wires pagehide and unmount to flush without flushing on every settings
   const debounceEffect = section(
     source,
     'useEffect(() => {\n    if (!settingsReady)',
-    '}, [settings, settingsReady, settingsSaver]);',
+    '}, [settings, settingsReady, settingsSaver, presetReceiptRevision]);',
   );
-  assert.match(debounceEffect, /settingsSaver\.schedule\(settings\)/);
+  assert.ok(debounceEffect.includes('settingsSaver.schedule({'));
   assert.doesNotMatch(
     debounceEffect,
     /settingsSaver\.flush(?:ForLifecycle)?\(\)/,
@@ -336,4 +336,60 @@ test('App keeps autosave disabled after uncertain settings load and exposes boun
   assert.match(source, /settingsReady/);
   assert.match(source, /onRetryPersistence/);
   assert.match(source, /role="alert"/);
+});
+
+test('#20 read failure is explicit instead of silently appearing as an empty preset collection', async () => {
+  const globalObject = globalThis as typeof globalThis & {indexedDB?: IDBFactory};
+  const previous = globalObject.indexedDB;
+  Object.defineProperty(globalObject, 'indexedDB', {
+    configurable: true,
+    value: {open() {throw new Error('DB blocked by browser');}},
+  });
+  try {
+    const storage = new StorageService();
+    const [layouts, tunings] = await Promise.all([
+      storage.loadLayoutPresets(), storage.loadTuningPresets(),
+    ]);
+    assert.equal(layouts.status, 'read_failed');
+    assert.equal(tunings.status, 'read_failed');
+    assert.ok(layouts.presets.length > 0, 'standard layouts remain playable');
+    assert.ok(tunings.presets.length > 0, 'standard tunings remain playable');
+    await assert.rejects(storage.saveLayoutPreset(layouts.presets[0]!), /blocked/);
+  } finally {
+    if (previous) Object.defineProperty(globalObject, 'indexedDB', {configurable:true,value:previous});
+    else delete globalObject.indexedDB;
+  }
+});
+
+test('#20 all eight preset writes are observed and errors are recoverable', async () => {
+  const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.ok(!app.includes('void storageService.saveLayoutPreset('));
+  assert.ok(!app.includes('void storageService.saveTuningPreset('));
+  assert.ok(app.includes('const persistPreset = useCallback'));
+  assert.ok(app.includes('presetWriteRevision.current.get(key) !== revision'));
+  assert.ok(app.includes('.catch((error: unknown) =>'));
+  assert.ok(app.includes('presetReadBlockedRef.current'));
+  assert.ok(app.includes('presetSaveFailures.length > 0'));
+  assert.ok(app.includes('retryPresetRead'));
+});
+
+test('#20 unsaved duplicate preset identity is not sent to settings storage before DB receipt', async () => {
+  const source = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('confirmedLayoutIds.current.has(layoutId)'));
+  assert.ok(source.includes('confirmedTuningIds.current.has(tuningId)'));
+  assert.ok(source.includes('persistedDefaultLayout.current'));
+  assert.ok(source.includes('persistedDefaultTuning.current'));
+  assert.ok(source.includes('setPresetReceiptRevision((previous) => previous + 1)'));
+});
+
+test('#20 settings-only retry cannot unlock autosave during unresolved preset read failure', async () => {
+  const source = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const start = source.indexOf('  const onRetryPersistence = useCallback(');
+  const end = source.indexOf('  const handleUpdateSettings', start);
+  assert.ok(start >= 0 && end > start);
+  const retry = source.slice(start, end);
+  const guard = retry.indexOf('if (presetReadBlockedRef.current)');
+  const unlock = retry.indexOf('setSettingsReady(true)');
+  assert.ok(guard >= 0 && unlock > guard, 'read uncertainty must be checked before enabling settings storage');
+  assert.match(retry.slice(guard, unlock), /setSettingsReady\(false\);[\s\S]*?return;/);
 });
