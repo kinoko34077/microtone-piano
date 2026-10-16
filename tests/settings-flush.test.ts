@@ -366,7 +366,7 @@ test('#20 all eight preset writes are observed and errors are recoverable', asyn
   assert.ok(!app.includes('void storageService.saveLayoutPreset('));
   assert.ok(!app.includes('void storageService.saveTuningPreset('));
   assert.ok(app.includes('const persistPreset = useCallback'));
-  assert.ok(app.includes('presetWriteRevision.current.get(key) === revision'));
+  assert.ok(app.includes('presetWriteRevision.current.get(key) !== revision'));
   assert.ok(app.includes('.catch((error: unknown) =>'));
   assert.ok(app.includes('presetReadBlockedRef.current'));
   assert.ok(app.includes('presetSaveFailures.length > 0'));
