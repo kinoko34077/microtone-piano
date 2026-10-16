@@ -337,3 +337,37 @@ test('App keeps autosave disabled after uncertain settings load and exposes boun
   assert.match(source, /onRetryPersistence/);
   assert.match(source, /role="alert"/);
 });
+
+test('#20 read failure is explicit instead of silently appearing as an empty preset collection', async () => {
+  const globalObject = globalThis as typeof globalThis & {indexedDB?: IDBFactory};
+  const previous = globalObject.indexedDB;
+  Object.defineProperty(globalObject, 'indexedDB', {
+    configurable: true,
+    value: {open() {throw new Error('DB blocked by browser');}},
+  });
+  try {
+    const storage = new StorageService();
+    const [layouts, tunings] = await Promise.all([
+      storage.loadLayoutPresets(), storage.loadTuningPresets(),
+    ]);
+    assert.equal(layouts.status, 'read_failed');
+    assert.equal(tunings.status, 'read_failed');
+    assert.ok(layouts.presets.length > 0, 'standard layouts remain playable');
+    assert.ok(tunings.presets.length > 0, 'standard tunings remain playable');
+    await assert.rejects(storage.saveLayoutPreset(layouts.presets[0]!), /blocked/);
+  } finally {
+    if (previous) Object.defineProperty(globalObject, 'indexedDB', {configurable:true,value:previous});
+    else delete globalObject.indexedDB;
+  }
+});
+
+test('#20 all eight preset writes report rejected results without dropping working drafts', async () => {
+  const app = (await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')).replace(/\\r\\n/g, '\\n');
+  assert.doesNotMatch(app, /void storageService\\.save(?:Layout|Tuning)Preset\\(/);
+  assert.match(app, /const persistPreset = useCallback/);
+  assert.match(app, /presetWriteRevision\\.current\\.get\\(key\\) === revision/);
+  assert.match(app, /result\\.then\\([\\s\\S]*?\\.catch\\(\\(error: unknown\\)/);
+  assert.match(app, /presetReadBlockedRef\\.current/);
+  assert.match(app, /presetSaveFailures\\.length > 0/);
+  assert.match(app, /retryPresetRead/);
+});
