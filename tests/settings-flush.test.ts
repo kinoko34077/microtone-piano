@@ -381,3 +381,15 @@ test('#20 unsaved duplicate preset identity is not sent to settings storage befo
   assert.ok(source.includes('persistedDefaultTuning.current'));
   assert.ok(source.includes('setPresetReceiptRevision((previous) => previous + 1)'));
 });
+
+test('#20 settings-only retry cannot unlock autosave during unresolved preset read failure', async () => {
+  const source = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const start = source.indexOf('  const onRetryPersistence = useCallback(');
+  const end = source.indexOf('  const handleUpdateSettings', start);
+  assert.ok(start >= 0 && end > start);
+  const retry = source.slice(start, end);
+  const guard = retry.indexOf('if (presetReadBlockedRef.current)');
+  const unlock = retry.indexOf('setSettingsReady(true)');
+  assert.ok(guard >= 0 && unlock > guard, 'read uncertainty must be checked before enabling settings storage');
+  assert.match(retry.slice(guard, unlock), /setSettingsReady\(false\);[\s\S]*?return;/);
+});
