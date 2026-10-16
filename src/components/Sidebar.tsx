@@ -156,10 +156,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : '不明なエラー';
       window.alert(`読み込みに失敗しました: ${message}`);
-    }
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    } finally {
+      // An invalid import can return early. Always allow the same file to be
+      // selected again after the user corrects its contents.
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
