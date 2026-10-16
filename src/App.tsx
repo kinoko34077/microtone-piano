@@ -39,6 +39,13 @@ function persistenceErrorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? '');
 }
 
+type PresetSaveFailure = {
+  key: string;
+  kind: 'layout' | 'tuning';
+  value: LayoutPreset | TuningPreset;
+  detail: string;
+};
+
 const MAX_OCTAVE_OFFSET = 5;
 
 function clampOctaveOffset(value: number): number {
@@ -83,6 +90,8 @@ export default function App() {
   const [pcPressedMap, setPcPressedMap] = useState<Map<string, PressedPcKey>>(new Map());
   const [settingsReady, setSettingsReady] = useState(false);
   const [persistenceNotice, setPersistenceNotice] = useState<PersistenceNotice | null>(null);
+  const [presetSaveFailures, setPresetSaveFailures] = useState<PresetSaveFailure[]>([]);
+  const presetWriteRevision = useRef(new Map<string, number>());
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
   const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
   const currentLayoutRef = useRef<LayoutPreset>(STANDARD_LAYOUT_12EDO);
@@ -283,6 +292,26 @@ export default function App() {
     globalAudioEngine.allNotesOff();
     setPcPressedMap(new Map());
   }, [pcKeyRegistry]);
+
+  const persistPreset = useCallback((kind: 'layout' | 'tuning', value: LayoutPreset | TuningPreset) => {
+    const key = kind + ':' + value.id;
+    const revision = (presetWriteRevision.current.get(key) ?? 0) + 1;
+    presetWriteRevision.current.set(key, revision);
+    setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
+    const result = kind === 'layout'
+      ? storageService.saveLayoutPreset(value as LayoutPreset)
+      : storageService.saveTuningPreset(value as TuningPreset);
+    void result.then(() => {
+      if (presetWriteRevision.current.get(key) === revision)
+        setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
+    }).catch((error: unknown) => {
+      if (presetWriteRevision.current.get(key) !== revision) return;
+      setPresetSaveFailures((previous) => [
+        ...previous.filter((item) => item.key !== key),
+        {key, kind, value, detail: persistenceErrorDetail(error)},
+      ]);
+    });
+  }, []);
 
   const handleDuplicateLayout = useCallback(() => {
     const duplicate: LayoutPreset = {
