@@ -298,6 +298,13 @@ export default function App() {
       return;
     }
 
+    // A settings-only retry must not unblock writes while preset DB reads
+    // remain unverified: doing so can persist fallback IDs over existing data.
+    if (presetReadBlockedRef.current) {
+      setPersistenceNotice(null);
+      setSettingsReady(false);
+      return;
+    }
     applyLoadedSettings(settingsResult.settings, allLayouts, allTunings);
     setPersistenceNotice(null);
     setSettingsReady(true);
