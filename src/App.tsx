@@ -94,6 +94,11 @@ export default function App() {
   const [presetReadFailure, setPresetReadFailure] = useState<string | null>(null);
   const presetReadBlockedRef = useRef(false);
   const presetWriteRevision = useRef(new Map<string, number>());
+  const confirmedLayoutIds = useRef(new Set(ALL_STANDARD_LAYOUTS.map((item) => item.id)));
+  const confirmedTuningIds = useRef(new Set(ALL_STANDARD_TUNINGS.map((item) => item.id)));
+  const persistedDefaultLayout = useRef(STANDARD_LAYOUT_12EDO.id);
+  const persistedDefaultTuning = useRef(STANDARD_TUNING_12EDO.id);
+  const [presetReceiptRevision, setPresetReceiptRevision] = useState(0);
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
   const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
   const currentLayoutRef = useRef<LayoutPreset>(STANDARD_LAYOUT_12EDO);
@@ -182,6 +187,16 @@ export default function App() {
       ]);
       const presetReadFailed = layoutLoad.status === 'read_failed' || tuningLoad.status === 'read_failed';
       presetReadBlockedRef.current = presetReadFailed;
+      if (!presetReadFailed) {
+        confirmedLayoutIds.current = new Set(layoutLoad.presets.map((item) => item.id));
+        confirmedTuningIds.current = new Set(tuningLoad.presets.map((item) => item.id));
+        if (settingsResult.settings.defaultLayoutPresetId &&
+            confirmedLayoutIds.current.has(settingsResult.settings.defaultLayoutPresetId))
+          persistedDefaultLayout.current = settingsResult.settings.defaultLayoutPresetId;
+        if (settingsResult.settings.defaultPitchPresetId &&
+            confirmedTuningIds.current.has(settingsResult.settings.defaultPitchPresetId))
+          persistedDefaultTuning.current = settingsResult.settings.defaultPitchPresetId;
+      }
       if (presetReadFailed) setPresetReadFailure(
         'プリセットを読み込めませんでした。上書きを防止しています。再試行してください。'
       );
