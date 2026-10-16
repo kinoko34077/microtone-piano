@@ -323,8 +323,8 @@ export default function App() {
     setAllLayouts((prev) => [...prev, duplicate]);
     setCurrentLayout(duplicate);
     setSettings((prev) => normalizeSettings({...prev, defaultLayoutPresetId: duplicate.id}));
-    void storageService.saveLayoutPreset(duplicate);
-  }, [currentLayout]);
+    persistPreset('layout', duplicate);
+  }, [currentLayout, persistPreset]);
 
   const handleDuplicateTuning = useCallback(() => {
     const duplicate: TuningPreset = {
@@ -336,24 +336,24 @@ export default function App() {
     setAllTunings((prev) => [...prev, duplicate]);
     setCurrentTuning(duplicate);
     setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: duplicate.id}));
-    void storageService.saveTuningPreset(duplicate);
-  }, [currentTuning]);
+    persistPreset('tuning', duplicate);
+  }, [currentTuning, persistPreset]);
 
   const handleSaveLayout = useCallback(() => {
     if (currentLayout.isStandard) {
       handleDuplicateLayout();
       return;
     }
-    void storageService.saveLayoutPreset(currentLayout);
-  }, [currentLayout, handleDuplicateLayout]);
+    persistPreset('layout', currentLayout);
+  }, [currentLayout, handleDuplicateLayout, persistPreset]);
 
   const handleSaveTuning = useCallback(() => {
     if (currentTuning.isStandard) {
       handleDuplicateTuning();
       return;
     }
-    void storageService.saveTuningPreset(currentTuning);
-  }, [currentTuning, handleDuplicateTuning]);
+    persistPreset('tuning', currentTuning);
+  }, [currentTuning, handleDuplicateTuning, persistPreset]);
 
   const handleSelectLayout = useCallback(
     (layout: LayoutPreset) => {
@@ -396,14 +396,14 @@ export default function App() {
       setAllLayouts((prev) => [...prev, duplicate]);
       setCurrentLayout(duplicate);
       setSettings((prev) => normalizeSettings({...prev, defaultLayoutPresetId: duplicate.id}));
-      void storageService.saveLayoutPreset(duplicate);
+      persistPreset('layout', duplicate);
       return;
     }
 
     setCurrentLayout(newLayout);
     setAllLayouts((prev) => prev.map((layout) => (layout.id === newLayout.id ? newLayout : layout)));
-    void storageService.saveLayoutPreset(newLayout);
-  }, []);
+    persistPreset('layout', newLayout);
+  }, [persistPreset]);
 
   const handleUpdateTuning = useCallback((newTuning: TuningPreset) => {
     if (newTuning.isStandard) {
@@ -416,14 +416,14 @@ export default function App() {
       setAllTunings((prev) => [...prev, duplicate]);
       setCurrentTuning(duplicate);
       setSettings((prev) => normalizeSettings({...prev, defaultPitchPresetId: duplicate.id}));
-      void storageService.saveTuningPreset(duplicate);
+      persistPreset('tuning', duplicate);
       return;
     }
 
     setCurrentTuning(newTuning);
     setAllTunings((prev) => prev.map((tuning) => (tuning.id === newTuning.id ? newTuning : tuning)));
-    void storageService.saveTuningPreset(newTuning);
-  }, []);
+    persistPreset('tuning', newTuning);
+  }, [persistPreset]);
 
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) =>
