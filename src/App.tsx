@@ -338,9 +338,10 @@ export default function App() {
     // During retry, retain the unresolved error until the DB confirms success.
     if (!retry) setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
     if (presetReadBlockedRef.current) {
-      setPresetSaveFailures((previous) => [...previous, {
-        key, kind, value, detail: '既存プリセットの読込失敗中は保存しません。先に読込を再試行してください。',
-      }]);
+      setPresetSaveFailures((previous) => [
+        ...previous.filter((item) => item.key !== key),
+        {key, kind, value, detail: '既存プリセットの読込失敗中は保存しません。先に読込を再試行してください。'},
+      ]);
       return;
     }
     const result = kind === 'layout'
