@@ -91,6 +91,8 @@ export default function App() {
   const [settingsReady, setSettingsReady] = useState(false);
   const [persistenceNotice, setPersistenceNotice] = useState<PersistenceNotice | null>(null);
   const [presetSaveFailures, setPresetSaveFailures] = useState<PresetSaveFailure[]>([]);
+  const [presetReadFailure, setPresetReadFailure] = useState<string | null>(null);
+  const presetReadBlockedRef = useRef(false);
   const presetWriteRevision = useRef(new Map<string, number>());
   const [upperMaxScrollOffset, setUpperMaxScrollOffset] = useState(0);
   const [lowerMaxScrollOffset, setLowerMaxScrollOffset] = useState(0);
@@ -173,10 +175,17 @@ export default function App() {
 
   useEffect(() => {
     const initData = async () => {
-      const layouts = await storageService.getAllLayoutPresets();
-      const tunings = await storageService.getAllTuningPresets();
-      const settingsResult = await storageService.loadSettings();
-      applyLoadedSettings(settingsResult.settings, layouts, tunings);
+      const [layoutLoad, tuningLoad, settingsResult] = await Promise.all([
+        storageService.loadLayoutPresets(),
+        storageService.loadTuningPresets(),
+        storageService.loadSettings(),
+      ]);
+      const presetReadFailed = layoutLoad.status === 'read_failed' || tuningLoad.status === 'read_failed';
+      presetReadBlockedRef.current = presetReadFailed;
+      if (presetReadFailed) setPresetReadFailure(
+        'プリセットを読み込めませんでした。上書きを防止しています。再試行してください。'
+      );
+      applyLoadedSettings(settingsResult.settings, layoutLoad.presets, tuningLoad.presets);
 
       if (settingsResult.status === 'read_failed') {
         setSettingsReady(false);
@@ -187,7 +196,7 @@ export default function App() {
         });
       } else {
         setPersistenceNotice(null);
-        setSettingsReady(true);
+        setSettingsReady(!presetReadFailed);
       }
     };
 
@@ -298,6 +307,12 @@ export default function App() {
     const revision = (presetWriteRevision.current.get(key) ?? 0) + 1;
     presetWriteRevision.current.set(key, revision);
     setPresetSaveFailures((previous) => previous.filter((item) => item.key !== key));
+    if (presetReadBlockedRef.current) {
+      setPresetSaveFailures((previous) => [...previous, {
+        key, kind, value, detail: '既存プリセットの読込失敗中は保存しません。先に読込を再試行してください。',
+      }]);
+      return;
+    }
     const result = kind === 'layout'
       ? storageService.saveLayoutPreset(value as LayoutPreset)
       : storageService.saveTuningPreset(value as TuningPreset);
