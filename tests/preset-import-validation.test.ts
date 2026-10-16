@@ -157,3 +157,15 @@ test('standalone tuning and malformed wrapper are classified deterministically',
   );
   assert.equal(malformedWrapper.ok, false);
 });
+
+
+test('#21 invalid import retains previous presets and always clears the file selection in finally', async () => {
+  const source = await readFile(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8');
+  const start = source.indexOf('const handleFileImport = async');
+  const end = source.indexOf('\n  return (', start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /if \('error' in admission\)\s*\{[\s\S]*?return;/);
+  assert.match(handler, /\} finally \{[\s\S]*?fileInputRef\.current\.value = ''/);
+  assert.ok(handler.indexOf('} finally {') > handler.indexOf('} catch (error: unknown)'));
+});
