@@ -157,7 +157,7 @@ test('App wires pagehide and unmount to flush without flushing on every settings
   const source = (await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
   assert.match(source, /DebouncedSettingsSaver/);
-  assert.match(source, /settingsSaver\.schedule\(settings\)/);
+  assert.ok(source.includes('settingsSaver.schedule({'));
   assert.match(source, /window\.addEventListener\('pagehide', flushPendingSettings\)/);
   assert.match(source, /window\.removeEventListener\('pagehide', flushPendingSettings\)/);
   assert.match(source, /settingsSaver\.flushForLifecycle\(\)/);
@@ -169,9 +169,9 @@ test('App wires pagehide and unmount to flush without flushing on every settings
   const debounceEffect = section(
     source,
     'useEffect(() => {\n    if (!settingsReady)',
-    '}, [settings, settingsReady, settingsSaver]);',
+    '}, [settings, settingsReady, settingsSaver, presetReceiptRevision]);',
   );
-  assert.match(debounceEffect, /settingsSaver\.schedule\(settings\)/);
+  assert.ok(debounceEffect.includes('settingsSaver.schedule({'));
   assert.doesNotMatch(
     debounceEffect,
     /settingsSaver\.flush(?:ForLifecycle)?\(\)/,
@@ -371,4 +371,13 @@ test('#20 all eight preset writes are observed and errors are recoverable', asyn
   assert.ok(app.includes('presetReadBlockedRef.current'));
   assert.ok(app.includes('presetSaveFailures.length > 0'));
   assert.ok(app.includes('retryPresetRead'));
+});
+
+test('#20 unsaved duplicate preset identity is not sent to settings storage before DB receipt', async () => {
+  const source = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('confirmedLayoutIds.current.has(layoutId)'));
+  assert.ok(source.includes('confirmedTuningIds.current.has(tuningId)'));
+  assert.ok(source.includes('persistedDefaultLayout.current'));
+  assert.ok(source.includes('persistedDefaultTuning.current'));
+  assert.ok(source.includes('setPresetReceiptRevision((previous) => previous + 1)'));
 });
