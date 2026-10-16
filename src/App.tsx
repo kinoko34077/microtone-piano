@@ -328,6 +328,33 @@ export default function App() {
     });
   }, []);
 
+  const retryPresetRead = useCallback(async () => {
+    const [layouts, tunings, settingsResult] = await Promise.all([
+      storageService.loadLayoutPresets(),
+      storageService.loadTuningPresets(),
+      storageService.loadSettings(),
+    ]);
+    if (layouts.status === 'read_failed' || tunings.status === 'read_failed') {
+      setPresetReadFailure('プリセットをまだ読み込めません。現在の編集内容は保持しています。');
+      return;
+    }
+    // Incorporate recovered storage without replacing in-progress local drafts.
+    setAllLayouts((previous) => {
+      const ids = new Set(layouts.presets.map((item) => item.id));
+      return [...layouts.presets, ...previous.filter((item) => !item.isStandard && !ids.has(item.id))];
+    });
+    setAllTunings((previous) => {
+      const ids = new Set(tunings.presets.map((item) => item.id));
+      return [...tunings.presets, ...previous.filter((item) => !item.isStandard && !ids.has(item.id))];
+    });
+    presetReadBlockedRef.current = false;
+    setPresetReadFailure(null);
+    if (settingsResult.status !== 'read_failed') {
+      setSettingsReady(true);
+      setPersistenceNotice((previous) => previous?.kind === 'read_failed' ? null : previous);
+    }
+  }, []);
+
   const handleDuplicateLayout = useCallback(() => {
     const duplicate: LayoutPreset = {
       ...currentLayout,
@@ -584,6 +611,15 @@ export default function App() {
             className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-400/10"
           >
             {SETTINGS_RETRY_LABEL}
+          </button>
+        </div>
+      )}
+      {presetReadFailure && (
+        <div role="alert" className="fixed bottom-20 right-3 z-[60] flex max-w-sm items-center gap-2 rounded border border-amber-500/60 bg-[#161b22] px-3 py-2 text-xs text-amber-100 shadow-lg">
+          <span>{presetReadFailure}</span>
+          <button type="button" onClick={() => void retryPresetRead()}
+            className="shrink-0 rounded border border-amber-400/70 px-2 py-1 text-xs font-semibold">
+            読込を再試行
           </button>
         </div>
       )}
