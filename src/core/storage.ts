@@ -14,6 +14,10 @@ const STORE_TUNINGS = 'tuningPresets';
 const STORE_SETTINGS = 'appSettings';
 
 // 初期アプリケーション設定
+export type PresetLoadResult<T> =
+  | {status: 'loaded'; presets: T[]}
+  | {status: 'read_failed'; presets: T[]; error: unknown};
+
 export type SettingsLoadResult =
   | {status: 'loaded'; settings: AppSettings}
   | {status: 'absent'; settings: AppSettings}
@@ -80,7 +84,7 @@ export class StorageService {
   }
 
   // --- 配置プリセット操作 ---
-  public async getAllLayoutPresets(): Promise<LayoutPreset[]> {
+  public async loadLayoutPresets(): Promise<PresetLoadResult<LayoutPreset>> {
     try {
       const db = await this.initDB();
       const tx = db.transaction(STORE_LAYOUTS, 'readonly');
@@ -89,16 +93,23 @@ export class StorageService {
       return new Promise((resolve) => {
         req.onsuccess = () => {
           const userPresets: LayoutPreset[] = req.result || [];
-          // 標準プリセットとユーザー保存プリセットを統合
-          const standardIds = new Set(ALL_STANDARD_LAYOUTS.map((s) => s.id));
-          const filteredUser = userPresets.filter((u) => !standardIds.has(u.id));
-          resolve([...ALL_STANDARD_LAYOUTS, ...filteredUser]);
+          const standardIds = new Set(ALL_STANDARD_LAYOUTS.map((standard) => standard.id));
+          const filteredUser = userPresets.filter((preset) => !standardIds.has(preset.id));
+          resolve({status: 'loaded', presets: [...ALL_STANDARD_LAYOUTS, ...filteredUser]});
         };
-        req.onerror = () => resolve(ALL_STANDARD_LAYOUTS);
+        req.onerror = () => resolve({
+          status: 'read_failed',
+          presets: ALL_STANDARD_LAYOUTS,
+          error: req.error ?? new Error('Layout presets read failed'),
+        });
       });
-    } catch {
-      return ALL_STANDARD_LAYOUTS;
+    } catch (error) {
+      return {status: 'read_failed', presets: ALL_STANDARD_LAYOUTS, error};
     }
+  }
+
+  public async getAllLayoutPresets(): Promise<LayoutPreset[]> {
+    return (await this.loadLayoutPresets()).presets;
   }
 
   public async saveLayoutPreset(preset: LayoutPreset): Promise<void> {
@@ -117,7 +128,7 @@ export class StorageService {
   }
 
   // --- 音高プリセット操作 ---
-  public async getAllTuningPresets(): Promise<TuningPreset[]> {
+  public async loadTuningPresets(): Promise<PresetLoadResult<TuningPreset>> {
     try {
       const db = await this.initDB();
       const tx = db.transaction(STORE_TUNINGS, 'readonly');
@@ -126,15 +137,23 @@ export class StorageService {
       return new Promise((resolve) => {
         req.onsuccess = () => {
           const userPresets: TuningPreset[] = req.result || [];
-          const standardIds = new Set(ALL_STANDARD_TUNINGS.map((s) => s.id));
-          const filteredUser = userPresets.filter((u) => !standardIds.has(u.id));
-          resolve([...ALL_STANDARD_TUNINGS, ...filteredUser]);
+          const standardIds = new Set(ALL_STANDARD_TUNINGS.map((standard) => standard.id));
+          const filteredUser = userPresets.filter((preset) => !standardIds.has(preset.id));
+          resolve({status: 'loaded', presets: [...ALL_STANDARD_TUNINGS, ...filteredUser]});
         };
-        req.onerror = () => resolve(ALL_STANDARD_TUNINGS);
+        req.onerror = () => resolve({
+          status: 'read_failed',
+          presets: ALL_STANDARD_TUNINGS,
+          error: req.error ?? new Error('Tuning presets read failed'),
+        });
       });
-    } catch {
-      return ALL_STANDARD_TUNINGS;
+    } catch (error) {
+      return {status: 'read_failed', presets: ALL_STANDARD_TUNINGS, error};
     }
+  }
+
+  public async getAllTuningPresets(): Promise<TuningPreset[]> {
+    return (await this.loadTuningPresets()).presets;
   }
 
   public async saveTuningPreset(preset: TuningPreset): Promise<void> {
