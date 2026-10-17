@@ -4,11 +4,11 @@ import { spawn } from 'node:child_process';
 import { webkit } from 'playwright';
 
 // #24: Fresh isolated WebKit contexts only. This does NOT test physical iPhone Safari.
-const address = 'http://127.0.0.1:8795/';
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function startPreview() {
-  const server = spawn('npm', ['run', 'preview', '--', '--host', '127.0.0.1', '--port', '8795', '--strictPort'], { stdio: 'ignore' });
+async function startPreview(port) {
+  const address = 'http://127.0.0.1:' + port + '/';
+  const server = spawn('npm', ['run', 'preview', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { stdio: 'ignore' });
   for (let i = 0; i < 75; i++) {
     if (server.exitCode !== null) throw new Error('Preview server exited: ' + server.exitCode);
     try { if ((await fetch(address)).ok) return server; } catch {}
@@ -48,7 +48,9 @@ async function openMenu(page) {
 }
 
 test('#24 WebKit: fresh preset save is durable after reload in an isolated profile', { timeout: 150000 }, async () => {
-  const server = await startPreview();
+  const port = 8795;
+  const address = 'http://127.0.0.1:' + port + '/';
+  const server = await startPreview(port);
   let browser;
   try {
     browser = await webkit.launch({ headless: true });
@@ -97,7 +99,9 @@ test('#24 WebKit: fresh preset save is durable after reload in an isolated profi
 });
 
 test('#24 WebKit: refused IndexedDB write preserves draft and retries without false saved ID', { timeout: 150000 }, async () => {
-  const server = await startPreview();
+  const port = 8796;
+  const address = 'http://127.0.0.1:' + port + '/';
+  const server = await startPreview(port);
   let browser;
   try {
     browser = await webkit.launch({ headless: true });
@@ -161,7 +165,9 @@ test('#24 WebKit: refused IndexedDB write preserves draft and retries without fa
 });
 
 test('#24 WebKit: same invalid file may be selected twice without changing presets', { timeout: 150000 }, async () => {
-  const server = await startPreview();
+  const port = 8797;
+  const address = 'http://127.0.0.1:' + port + '/';
+  const server = await startPreview(port);
   let browser;
   try {
     browser = await webkit.launch({ headless: true });
