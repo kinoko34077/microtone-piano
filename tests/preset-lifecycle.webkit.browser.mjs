@@ -42,6 +42,24 @@ async function dbState(page) {
   });
 }
 
+// Poll actual completed transactions from Node, not an async Promise returned
+// to WebKit's waitForFunction (which may be treated as a truthy handle).
+async function waitForDurableState(page, id) {
+  const deadline = Date.now() + 20000;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await dbState(page);
+    if (last.id === id && last.presetSaved && last.persistedDefault === id) {
+      await pause(350);
+      const repeated = await dbState(page);
+      if (repeated.id === id && repeated.presetSaved && repeated.persistedDefault === id)
+        return repeated;
+    }
+    await pause(120);
+  }
+  throw new Error('Preset/settings durable state did not converge: ' + JSON.stringify(last));
+}
+
 async function openMenu(page) {
   await page.locator('button[aria-label="メニューを開く"]').click();
   await page.locator('button[aria-label="鍵盤配置を複製"]').waitFor();
@@ -61,31 +79,11 @@ test('#24 WebKit: fresh preset save is durable after reload in an isolated profi
     await page.goto(address);
     await openMenu(page);
     await page.locator('button[aria-label="鍵盤配置を複製"]').click();
-    await page.waitForFunction(async () => {
-      const id = document.querySelector('#layout-select')?.value;
-      if (!id?.startsWith('layout_custom_')) return false;
-      const db = await new Promise((ok, fail) => {
-        const r = indexedDB.open('MultiMicrotonalKeyboardDB', 1);
-        r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error);
-      });
-      try {
-        const tx = db.transaction(['layoutPresets', 'appSettings'], 'readonly');
-        const get = (store, key) => new Promise((ok, fail) => {
-          const r = tx.objectStore(store).get(key);
-          r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error);
-        });
-        const [preset, settings] = await Promise.all([
-          get('layoutPresets', id), get('appSettings', 'current_settings')
-        ]);
-        return Boolean(preset) && settings?.value?.defaultLayoutPresetId === id;
-      } finally { db.close(); }
-    }, null, { timeout: 20000 });
+    await page.waitForFunction(() => document.querySelector('#layout-select')
+      ?.value?.startsWith('layout_custom_'));
     const before = await dbState(page);
     console.log('WEBKIT_FRESH_EARLY_STATE', JSON.stringify(before));
-    // Settings use a 180ms debounce; independently recheck after it settles
-    // before interpreting a mismatched default as a durable state defect.
-    await pause(1000);
-    const beforeSettled = await dbState(page);
+    const beforeSettled = await waitForDurableState(page, before.id);
     console.log('WEBKIT_FRESH_SETTLED_STATE', JSON.stringify(beforeSettled));
     assert.equal(beforeSettled.presetSaved, true);
     assert.equal(beforeSettled.persistedDefault, beforeSettled.id);
@@ -137,27 +135,9 @@ test('#24 WebKit: refused IndexedDB write preserves draft and retries without fa
 
     await page.evaluate(() => window.__restorePresetPut());
     await page.getByRole('button', { name: '保存を再試行' }).click();
-    await page.waitForFunction(async (id) => {
-      const db = await new Promise((ok, fail) => {
-        const r = indexedDB.open('MultiMicrotonalKeyboardDB', 1);
-        r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error);
-      });
-      try {
-        const tx = db.transaction(['layoutPresets', 'appSettings'], 'readonly');
-        const get = (store, key) => new Promise((ok, fail) => {
-          const r = tx.objectStore(store).get(key);
-          r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error);
-        });
-        const [preset, settings] = await Promise.all([
-          get('layoutPresets', id), get('appSettings', 'current_settings')
-        ]);
-        return !!preset && settings?.value?.defaultLayoutPresetId === id;
-      } finally { db.close(); }
-    }, denied.id, { timeout: 20000 });
     const recovered = await dbState(page);
     console.log('WEBKIT_RECOVERY_EARLY_STATE', JSON.stringify(recovered));
-    await pause(1000);
-    const recoveredSettled = await dbState(page);
+    const recoveredSettled = await waitForDurableState(page, denied.id);
     console.log('WEBKIT_RECOVERY_SETTLED_STATE', JSON.stringify(recoveredSettled));
     assert.equal(recoveredSettled.persistedDefault, denied.id);
     assert.equal(recoveredSettled.presetSaved, true);
@@ -167,7 +147,7 @@ test('#24 WebKit: refused IndexedDB write preserves draft and retries without fa
       denied.id, { timeout: 10000 });
     assert.deepEqual(errors, []);
     await context.close();
-    console.log('WEBKIT_DENIED_RECOVERY_PASS', JSON.stringify({ denied, recovered }));
+    console.log('WEBKIT_DENIED_RECOVERY_PASS', JSON.stringify({ denied, recovered: recoveredSettled }));
   } finally {
     await browser?.close();
     server.kill('SIGTERM');
