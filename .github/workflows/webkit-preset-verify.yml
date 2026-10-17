@@ -8,6 +8,7 @@ on:
       - "src/App.tsx"
       - "src/components/Sidebar.tsx"
       - "src/core/storage.ts"
+      - "src/core/debouncedSettingsSaver.ts"
   workflow_dispatch:
 
 permissions:
