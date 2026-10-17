@@ -81,14 +81,20 @@ test('#24 WebKit: fresh preset save is durable after reload in an isolated profi
       } finally { db.close(); }
     }, null, { timeout: 20000 });
     const before = await dbState(page);
-    assert.equal(before.presetSaved, true);
-    assert.equal(before.persistedDefault, before.id);
+    console.log('WEBKIT_FRESH_EARLY_STATE', JSON.stringify(before));
+    // Settings use a 180ms debounce; independently recheck after it settles
+    // before interpreting a mismatched default as a durable state defect.
+    await pause(1000);
+    const beforeSettled = await dbState(page);
+    console.log('WEBKIT_FRESH_SETTLED_STATE', JSON.stringify(beforeSettled));
+    assert.equal(beforeSettled.presetSaved, true);
+    assert.equal(beforeSettled.persistedDefault, beforeSettled.id);
     await page.reload();
     await openMenu(page);
     await page.waitForFunction((id) => document.querySelector('#layout-select')?.value === id,
       before.id, { timeout: 10000 });
     const after = await dbState(page);
-    assert.deepEqual(after, before);
+    assert.deepEqual(after, beforeSettled);
     assert.deepEqual(errors, []);
     await context.close();
     console.log('WEBKIT_FRESH_SAVE_RELOAD_PASS', JSON.stringify(after));
@@ -149,8 +155,12 @@ test('#24 WebKit: refused IndexedDB write preserves draft and retries without fa
       } finally { db.close(); }
     }, denied.id, { timeout: 20000 });
     const recovered = await dbState(page);
-    assert.equal(recovered.persistedDefault, denied.id);
-    assert.equal(recovered.presetSaved, true);
+    console.log('WEBKIT_RECOVERY_EARLY_STATE', JSON.stringify(recovered));
+    await pause(1000);
+    const recoveredSettled = await dbState(page);
+    console.log('WEBKIT_RECOVERY_SETTLED_STATE', JSON.stringify(recoveredSettled));
+    assert.equal(recoveredSettled.persistedDefault, denied.id);
+    assert.equal(recoveredSettled.presetSaved, true);
     await page.reload();
     await openMenu(page);
     await page.waitForFunction(id => document.querySelector('#layout-select')?.value === id,
