@@ -19,7 +19,7 @@ test('uncached piano starts fallback immediately while warming sample asynchrono
   assert.match(source, /export type PianoSampleStatus/);
   assert.match(source, /setPianoSampleStatusCallback/);
   assert.match(piano, /kind: 'loading'/);
-  assert.match(piano, /void this\.loadPianoSampleBuffer\(sample\)\.catch/);
+  assert.match(piano, /void this\.loadPianoSampleBuffer\(sample\)\.then/);
   assert.match(piano, /const fallback = ctx\.createOscillator\(\)/);
   assert.match(piano, /fallback\.start\(now\)/);
   assert.match(piano, /return \{oscillators: \[fallback\], sourceNodes: \[\]\}/);
@@ -32,8 +32,17 @@ test('failed sample preparation reports error without delaying the initial fallb
 
   assert.match(piano, /kind: 'error'/);
   assert.match(piano, /kind: 'loading'/);
-  assert.match(piano, /catch\(\(\) =>/);
+  assert.match(piano, /this\.warmingSampleIds\.delete\(sample\.id\)/);
   assert.doesNotMatch(piano, /elapsed > MAX_PIANO_START_LATENCY_SECONDS/);
+});
+
+test('completed background loads clear the loading status only after the last sample', async () => {
+  const source = await read('src/core/audio.ts');
+  const piano = section(source, 'private async createPianoSources(', 'private async runPianoSamplePreload');
+  assert.match(source, /private warmingSampleIds: Set<string>/);
+  assert.match(piano, /this\.warmingSampleIds\.add\(sample\.id\)/);
+  assert.match(piano, /if \(this\.warmingSampleIds\.size === 0\)/);
+  assert.match(piano, /this\.emitPianoSampleStatus\(null\)/);
 });
 
 test('successful piano start clears stale readiness warnings', async () => {
