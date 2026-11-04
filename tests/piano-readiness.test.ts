@@ -12,28 +12,28 @@ function section(source: string, start: string, end: string): string {
   return source.slice(startIndex, endIndex);
 }
 
-test('uncached piano loading becomes observable before awaiting sample decode', async () => {
+test('uncached piano starts fallback immediately while warming sample asynchronously', async () => {
   const source = await read('src/core/audio.ts');
   const piano = section(source, 'private async createPianoSources(', 'private async runPianoSamplePreload');
 
   assert.match(source, /export type PianoSampleStatus/);
   assert.match(source, /setPianoSampleStatusCallback/);
   assert.match(piano, /kind: 'loading'/);
-  assert.ok(
-    piano.indexOf("kind: 'loading'") < piano.indexOf('await this.loadPianoSampleBuffer(sample)'),
-    'loading status must be emitted before waiting on fetch/decode',
-  );
+  assert.match(piano, /void this\.loadPianoSampleBuffer\(sample\)\.catch/);
+  assert.match(piano, /const fallback = ctx\.createOscillator\(\)/);
+  assert.match(piano, /fallback\.start\(now\)/);
+  assert.match(piano, /return \{oscillators: \[fallback\], sourceNodes: \[\]\}/);
+  assert.doesNotMatch(piano, /await this\.loadPianoSampleBuffer\(sample\)/);
 });
 
-test('slow or failed piano preparation reports a bounded reason instead of silent discard', async () => {
+test('failed sample preparation reports error without delaying the initial fallback voice', async () => {
   const source = await read('src/core/audio.ts');
   const piano = section(source, 'private async createPianoSources(', 'private async runPianoSamplePreload');
 
   assert.match(piano, /kind: 'error'/);
-  assert.match(piano, /kind: 'delayed'/);
-  assert.match(piano, /遅れて鳴らさず/);
-  assert.match(piano, /もう一度/);
-  assert.match(piano, /elapsed > MAX_PIANO_START_LATENCY_SECONDS/);
+  assert.match(piano, /kind: 'loading'/);
+  assert.match(piano, /catch\(\(\) =>/);
+  assert.doesNotMatch(piano, /elapsed > MAX_PIANO_START_LATENCY_SECONDS/);
 });
 
 test('successful piano start clears stale readiness warnings', async () => {
