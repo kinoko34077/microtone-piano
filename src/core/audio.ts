@@ -206,58 +206,75 @@ export class AudioEngine {
     const epoch = this.voiceEpoch;
     this.pendingVoices.set(voiceId, pending);
     this.pendingVoiceCount += 1;
-    const sources = await this.createSourcesForVoice(
-      ctx, frequency, voiceGain, now,
-      () => pending.cancelled || epoch !== this.voiceEpoch || shouldStart?.() === false,
-    ).finally(() => {
+    // Return the voice identity before sample decoding, so an ordinary noteOff
+    // can cancel a key that was released while its piano sample was loading.
+    void (async () => {
+      const sources = await this.createSourcesForVoice(
+        ctx, frequency, voiceGain, now,
+        () => pending.cancelled || epoch !== this.voiceEpoch || shouldStart?.() === false,
+      ).finally(() => {
+        this.pendingVoices.delete(voiceId);
+        this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
+      });
+      if (!sources) {
+        try {
+          voiceGain.disconnect();
+        } catch {
+          // ignore disconnect errors
+        }
+        return voiceId;
+      }
+
+      const {oscillators, sourceNodes, naturalDurationMs} = sources;
+
+      const voiceNode: VoiceNode = {
+        voiceId,
+        address,
+        pitchId,
+        frequency,
+        gainNode: voiceGain,
+        oscillators,
+        sourceNodes,
+        isSustained: this.isSustainActive,
+        isReleased: false,
+        startTime: now,
+      };
+
+      if (this.noteDecayMs > 0) {
+        const decayEndTime = now + attackTime + this.noteDecayMs / 1000;
+        voiceGain.gain.exponentialRampToValueAtTime(0.0001, decayEndTime);
+        voiceNode.decayTimeoutId = window.setTimeout(() => {
+          if (!this.activeVoices.has(voiceId) || !this.ctx) {
+            return;
+          }
+          this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
+        }, Math.ceil(attackTime * 1000 + this.noteDecayMs + 50));
+      }
+
+      if (naturalDurationMs !== undefined) {
+        voiceNode.naturalEndTimeoutId = window.setTimeout(() => {
+          if (!this.activeVoices.has(voiceId) || !this.ctx) {
+            return;
+          }
+          this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
+        }, naturalDurationMs);
+      }
+
+      this.activeVoices.set(voiceId, voiceNode);
+
+    })().catch(() => {
       this.pendingVoices.delete(voiceId);
       this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
-    });
-    if (!sources) {
       try {
         voiceGain.disconnect();
       } catch {
-        // ignore disconnect errors
+        // Audio node may already have been disconnected.
       }
-      return voiceId;
-    }
-
-    const {oscillators, sourceNodes, naturalDurationMs} = sources;
-
-    const voiceNode: VoiceNode = {
-      voiceId,
-      address,
-      pitchId,
-      frequency,
-      gainNode: voiceGain,
-      oscillators,
-      sourceNodes,
-      isSustained: this.isSustainActive,
-      isReleased: false,
-      startTime: now,
-    };
-
-    if (this.noteDecayMs > 0) {
-      const decayEndTime = now + attackTime + this.noteDecayMs / 1000;
-      voiceGain.gain.exponentialRampToValueAtTime(0.0001, decayEndTime);
-      voiceNode.decayTimeoutId = window.setTimeout(() => {
-        if (!this.activeVoices.has(voiceId) || !this.ctx) {
-          return;
-        }
-        this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
-      }, Math.ceil(attackTime * 1000 + this.noteDecayMs + 50));
-    }
-
-    if (naturalDurationMs !== undefined) {
-      voiceNode.naturalEndTimeoutId = window.setTimeout(() => {
-        if (!this.activeVoices.has(voiceId) || !this.ctx) {
-          return;
-        }
-        this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
-      }, naturalDurationMs);
-    }
-
-    this.activeVoices.set(voiceId, voiceNode);
+      this.emitPianoSampleStatus({
+        kind: 'error',
+        message: 'ピアノ音源の再生準備に失敗しました。',
+      });
+    });
     return voiceId;
   }
 
