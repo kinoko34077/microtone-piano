@@ -212,10 +212,7 @@ export class AudioEngine {
       const sources = await this.createSourcesForVoice(
         ctx, frequency, voiceGain, now,
         () => pending.cancelled || epoch !== this.voiceEpoch || shouldStart?.() === false,
-      ).finally(() => {
-        this.pendingVoices.delete(voiceId);
-        this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
-      });
+      );
       if (!sources) {
         try {
           voiceGain.disconnect();
@@ -226,6 +223,20 @@ export class AudioEngine {
       }
 
       const {oscillators, sourceNodes, naturalDurationMs} = sources;
+      if (pending.cancelled || epoch !== this.voiceEpoch || shouldStart?.() === false) {
+        // The decoded source may already have been started. A key released
+        // before registration must stop it rather than leave a hanging voice.
+        for (const source of sourceNodes) {
+          try { source.stop(ctx.currentTime); } catch { /* already stopped */ }
+          source.disconnect();
+        }
+        for (const oscillator of oscillators) {
+          try { oscillator.stop(ctx.currentTime); } catch { /* already stopped */ }
+          oscillator.disconnect();
+        }
+        voiceGain.disconnect();
+        return;
+      }
 
       const voiceNode: VoiceNode = {
         voiceId,
@@ -263,8 +274,6 @@ export class AudioEngine {
       this.activeVoices.set(voiceId, voiceNode);
 
     })().catch(() => {
-      this.pendingVoices.delete(voiceId);
-      this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
       try {
         voiceGain.disconnect();
       } catch {
@@ -274,6 +283,11 @@ export class AudioEngine {
         kind: 'error',
         message: 'ピアノ音源の再生準備に失敗しました。',
       });
+    }).finally(() => {
+      // Preserve the cancellation token until the source is either registered
+      // or definitively discarded, never just until decoding completes.
+      this.pendingVoices.delete(voiceId);
+      this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
     });
     return voiceId;
   }
