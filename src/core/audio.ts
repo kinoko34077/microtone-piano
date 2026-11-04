@@ -15,7 +15,6 @@ export type AudioContextStatus = {
   message: string;
 };
 
-const MAX_PIANO_START_LATENCY_SECONDS = 0.08;
 const PIANO_PRELOAD_CONCURRENCY = 1;
 
 interface VoiceNode {
@@ -423,30 +422,26 @@ export class AudioEngine {
       return null;
     }
 
-    let buffer = this.decodedSampleCache.get(sample.id);
+    const buffer = this.decodedSampleCache.get(sample.id);
     if (!buffer) {
+      // Never await a network/decode operation in the live chord path: the
+      // temporary oscillator starts immediately while the actual sample warms.
       this.emitPianoSampleStatus({
         kind: 'loading',
-        message: 'ピアノ音源を準備中です。',
+        message: 'ピアノ音源を準備中です。この音は一時的な代替音で再生しています。',
       });
-      try {
-        buffer = await this.loadPianoSampleBuffer(sample);
-      } catch {
+      void this.loadPianoSampleBuffer(sample).catch(() => {
         this.emitPianoSampleStatus({
           kind: 'error',
           message: 'ピアノ音源を読み込めませんでした。通信状態を確認してもう一度お試しください。',
         });
-        return null;
-      }
-    }
-
-    const elapsed = ctx.currentTime - now;
-    if (elapsed > MAX_PIANO_START_LATENCY_SECONDS) {
-      this.emitPianoSampleStatus({
-        kind: 'delayed',
-        message: 'ピアノ音源の準備に時間がかかったため、遅れて鳴らさずこの入力は再生しませんでした。もう一度押すと再生できます。',
       });
-      return null;
+      const fallback = ctx.createOscillator();
+      fallback.type = 'triangle';
+      fallback.frequency.setValueAtTime(frequency, now);
+      fallback.connect(gainNode);
+      fallback.start(now);
+      return {oscillators: [fallback], sourceNodes: []};
     }
 
     this.emitPianoSampleStatus(null);
@@ -465,11 +460,22 @@ export class AudioEngine {
     };
   }
 
+  private lastPianoSampleStatus: PianoSampleStatus | null = null;
+
   private emitPianoSampleStatus(status: PianoSampleStatus | null) {
+    if (this.lastPianoSampleStatus?.kind === status?.kind &&
+        this.lastPianoSampleStatus?.message === status?.message) {
+      return;
+    }
+    this.lastPianoSampleStatus = status;
     this.onPianoSampleStatusCallback?.(status);
   }
 
   private emitAudioContextStatus(status: AudioContextStatus | null) {
+    if (this.audioContextStatus?.kind === status?.kind &&
+        this.audioContextStatus?.message === status?.message) {
+      return;
+    }
     this.audioContextStatus = status;
     this.onAudioContextStatusCallback?.(status);
   }
@@ -545,6 +551,9 @@ export class AudioEngine {
       voice.naturalEndTimeoutId = undefined;
     }
 
+    // Exclude releasing voices from polyphony accounting immediately.
+    // Their nodes still complete the scheduled release and disconnect later.
+    this.activeVoices.delete(voiceId);
     const gain = voice.gainNode;
     const stopAt = now + releaseTime + 0.02;
 
