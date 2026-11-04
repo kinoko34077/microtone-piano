@@ -38,6 +38,7 @@ export class AudioEngine {
   private activeVoices: Map<string, VoiceNode> = new Map();
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
   private decodedSampleCache: Map<string, AudioBuffer> = new Map();
+  private warmingSampleIds: Set<string> = new Set();
   private pianoPreloadPromise: Promise<void> | null = null;
   private pianoPreloadTimerId: number | null = null;
   private pendingVoiceCount = 0;
@@ -430,12 +431,22 @@ export class AudioEngine {
         kind: 'loading',
         message: 'ピアノ音源を準備中です。この音は一時的な代替音で再生しています。',
       });
-      void this.loadPianoSampleBuffer(sample).catch(() => {
-        this.emitPianoSampleStatus({
-          kind: 'error',
-          message: 'ピアノ音源を読み込めませんでした。通信状態を確認してもう一度お試しください。',
-        });
-      });
+      this.warmingSampleIds.add(sample.id);
+      void this.loadPianoSampleBuffer(sample).then(
+        () => {
+          this.warmingSampleIds.delete(sample.id);
+          if (this.warmingSampleIds.size === 0) {
+            this.emitPianoSampleStatus(null);
+          }
+        },
+        () => {
+          this.warmingSampleIds.delete(sample.id);
+          this.emitPianoSampleStatus({
+            kind: 'error',
+            message: 'ピアノ音源を読み込めませんでした。通信状態を確認してもう一度お試しください。',
+          });
+        },
+      );
       const fallback = ctx.createOscillator();
       fallback.type = 'triangle';
       fallback.frequency.setValueAtTime(frequency, now);
