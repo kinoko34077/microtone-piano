@@ -38,7 +38,9 @@ export class AudioEngine {
   private activeVoices: Map<string, VoiceNode> = new Map();
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
   private decodedSampleCache: Map<string, AudioBuffer> = new Map();
-  private warmingSampleIds: Set<string> = new Set();
+  private pendingVoices: Map<string, {address: number; cancelled: boolean}> = new Map();
+  private voiceEpoch = 0;
+  private preloadNeedsResume = false;
   private pianoPreloadPromise: Promise<void> | null = null;
   private pianoPreloadTimerId: number | null = null;
   private pendingVoiceCount = 0;
@@ -148,7 +150,8 @@ export class AudioEngine {
     pitchId: number,
     frequency: number,
     velocity: number = 1.0,
-    pointerId?: number | string
+    pointerId?: number | string,
+    shouldStart?: () => boolean,
   ): Promise<string> {
     if (!isValidFrequencyValue(frequency)) {
       const timestamp = Date.now();
@@ -163,6 +166,9 @@ export class AudioEngine {
     }
 
     const ctx = await this.ensureAudioContext();
+    if (shouldStart?.() === false) {
+      return `cancelled_${address}_${pitchId}_${Date.now()}`;
+    }
     const now = ctx.currentTime;
 
     if (isFrequencyOutOfRecommendedRange(frequency) && this.onOutOfRangeCallback) {
@@ -189,66 +195,111 @@ export class AudioEngine {
     const velocityGain = Math.max(0.1, Math.min(1.0, velocity)) * 0.6;
 
     voiceGain.gain.setValueAtTime(0.0001, now);
-    voiceGain.gain.linearRampToValueAtTime(velocityGain, now + attackTime);
     voiceGain.connect(this.masterGain!);
 
     if (this.soundSource === 'piano') {
       this.schedulePianoPreload();
     }
 
+    const pending = {address, cancelled: false};
+    const epoch = this.voiceEpoch;
+    this.pendingVoices.set(voiceId, pending);
     this.pendingVoiceCount += 1;
-    const sources = await this.createSourcesForVoice(ctx, frequency, voiceGain, now).finally(() => {
-      this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
-    });
-    if (!sources) {
+    // Return the voice identity before sample decoding, so an ordinary noteOff
+    // can cancel a key that was released while its piano sample was loading.
+    void (async () => {
+      const sources = await this.createSourcesForVoice(
+        ctx, frequency, voiceGain, now,
+        () => pending.cancelled || epoch !== this.voiceEpoch || shouldStart?.() === false,
+      );
+      if (!sources) {
+        try {
+          voiceGain.disconnect();
+        } catch {
+          // ignore disconnect errors
+        }
+        return voiceId;
+      }
+
+      const {oscillators, sourceNodes, naturalDurationMs} = sources;
+      if (pending.cancelled || epoch !== this.voiceEpoch || shouldStart?.() === false) {
+        // The decoded source may already have been started. A key released
+        // before registration must stop it rather than leave a hanging voice.
+        for (const source of sourceNodes) {
+          try { source.stop(ctx.currentTime); } catch { /* already stopped */ }
+          source.disconnect();
+        }
+        for (const oscillator of oscillators) {
+          try { oscillator.stop(ctx.currentTime); } catch { /* already stopped */ }
+          oscillator.disconnect();
+        }
+        voiceGain.disconnect();
+        return;
+      }
+
+      // An uncached sample may complete well after the original key event.
+      // Start attack/decay from when the real audio is ready, not that event.
+      const playbackStart = Math.max(now, ctx.currentTime);
+      voiceGain.gain.setValueAtTime(0.0001, playbackStart);
+      voiceGain.gain.linearRampToValueAtTime(velocityGain, playbackStart + attackTime);
+
+      const voiceNode: VoiceNode = {
+        voiceId,
+        address,
+        pitchId,
+        frequency,
+        gainNode: voiceGain,
+        oscillators,
+        sourceNodes,
+        isSustained: this.isSustainActive,
+        isReleased: false,
+        startTime: playbackStart,
+      };
+
+      if (this.noteDecayMs > 0) {
+        const decayEndTime = playbackStart + attackTime + this.noteDecayMs / 1000;
+        voiceGain.gain.exponentialRampToValueAtTime(0.0001, decayEndTime);
+        voiceNode.decayTimeoutId = window.setTimeout(() => {
+          if (!this.activeVoices.has(voiceId) || !this.ctx) {
+            return;
+          }
+          this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
+        }, Math.ceil(attackTime * 1000 + this.noteDecayMs + 50));
+      }
+
+      if (naturalDurationMs !== undefined) {
+        voiceNode.naturalEndTimeoutId = window.setTimeout(() => {
+          if (!this.activeVoices.has(voiceId) || !this.ctx) {
+            return;
+          }
+          this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
+        }, naturalDurationMs);
+      }
+
+      this.activeVoices.set(voiceId, voiceNode);
+
+    })().catch(() => {
       try {
         voiceGain.disconnect();
       } catch {
-        // ignore disconnect errors
+        // Audio node may already have been disconnected.
       }
-      return voiceId;
-    }
-
-    const {oscillators, sourceNodes, naturalDurationMs} = sources;
-
-    const voiceNode: VoiceNode = {
-      voiceId,
-      address,
-      pitchId,
-      frequency,
-      gainNode: voiceGain,
-      oscillators,
-      sourceNodes,
-      isSustained: this.isSustainActive,
-      isReleased: false,
-      startTime: now,
-    };
-
-    if (this.noteDecayMs > 0) {
-      const decayEndTime = now + attackTime + this.noteDecayMs / 1000;
-      voiceGain.gain.exponentialRampToValueAtTime(0.0001, decayEndTime);
-      voiceNode.decayTimeoutId = window.setTimeout(() => {
-        if (!this.activeVoices.has(voiceId) || !this.ctx) {
-          return;
-        }
-        this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
-      }, Math.ceil(attackTime * 1000 + this.noteDecayMs + 50));
-    }
-
-    if (naturalDurationMs !== undefined) {
-      voiceNode.naturalEndTimeoutId = window.setTimeout(() => {
-        if (!this.activeVoices.has(voiceId) || !this.ctx) {
-          return;
-        }
-        this.stopVoiceNode(voiceId, this.ctx.currentTime, 0.01);
-      }, naturalDurationMs);
-    }
-
-    this.activeVoices.set(voiceId, voiceNode);
+      this.emitPianoSampleStatus({
+        kind: 'error',
+        message: 'ピアノ音源の再生準備に失敗しました。',
+      });
+    }).finally(() => {
+      // Preserve the cancellation token until the source is either registered
+      // or definitively discarded, never just until decoding completes.
+      this.pendingVoices.delete(voiceId);
+      this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
+    });
     return voiceId;
   }
 
   public noteOff(voiceId: string) {
+    const pending = this.pendingVoices.get(voiceId);
+    if (pending) pending.cancelled = true;
     const voice = this.activeVoices.get(voiceId);
     if (!voice || !this.ctx) {
       return;
@@ -264,6 +315,9 @@ export class AudioEngine {
   }
 
   public noteOffByAddress(address: number) {
+    for (const pending of this.pendingVoices.values()) {
+      if (pending.address === address) pending.cancelled = true;
+    }
     if (!this.ctx) {
       return;
     }
@@ -284,6 +338,8 @@ export class AudioEngine {
   }
 
   public allNotesOff() {
+    this.voiceEpoch += 1;
+    for (const pending of this.pendingVoices.values()) pending.cancelled = true;
     if (!this.ctx) {
       return;
     }
@@ -315,6 +371,10 @@ export class AudioEngine {
 
     this.pianoPreloadPromise = this.runPianoSamplePreload().finally(() => {
       this.pianoPreloadPromise = null;
+      if (this.preloadNeedsResume) {
+        this.preloadNeedsResume = false;
+        this.schedulePianoPreload();
+      }
     });
     return this.pianoPreloadPromise;
   }
@@ -390,10 +450,12 @@ export class AudioEngine {
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
-    now: number
+    now: number,
+    isCancelled: () => boolean,
   ): Promise<(Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}) | null> {
+    if (isCancelled()) return null;
     if (this.soundSource === 'piano') {
-      return this.createPianoSources(ctx, frequency, gainNode, now);
+      return this.createPianoSources(ctx, frequency, gainNode, now, isCancelled);
     }
 
     const osc = ctx.createOscillator();
@@ -412,7 +474,8 @@ export class AudioEngine {
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
-    now: number
+    now: number,
+    isCancelled: () => boolean,
   ): Promise<(Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}) | null> {
     const sample = findNearestPianoSample(frequency);
     if (!sample) {
@@ -423,38 +486,26 @@ export class AudioEngine {
       return null;
     }
 
-    const buffer = this.decodedSampleCache.get(sample.id);
+    // Always use the requested piano sample; do not replace its timbre with
+    // an oscillator. Sample loads share one promise per unique sample ID.
+    let buffer = this.decodedSampleCache.get(sample.id);
     if (!buffer) {
-      // Never await a network/decode operation in the live chord path: the
-      // temporary oscillator starts immediately while the actual sample warms.
       this.emitPianoSampleStatus({
         kind: 'loading',
-        message: 'ピアノ音源を準備中です。この音は一時的な代替音で再生しています。',
+        message: 'ピアノ音源を準備中です。',
       });
-      this.warmingSampleIds.add(sample.id);
-      void this.loadPianoSampleBuffer(sample).then(
-        () => {
-          this.warmingSampleIds.delete(sample.id);
-          if (this.warmingSampleIds.size === 0) {
-            this.emitPianoSampleStatus(null);
-          }
-        },
-        () => {
-          this.warmingSampleIds.delete(sample.id);
-          this.emitPianoSampleStatus({
-            kind: 'error',
-            message: 'ピアノ音源を読み込めませんでした。通信状態を確認してもう一度お試しください。',
-          });
-        },
-      );
-      const fallback = ctx.createOscillator();
-      fallback.type = 'triangle';
-      fallback.frequency.setValueAtTime(frequency, now);
-      fallback.connect(gainNode);
-      fallback.start(now);
-      return {oscillators: [fallback], sourceNodes: []};
+      try {
+        buffer = await this.loadPianoSampleBuffer(sample);
+      } catch {
+        this.emitPianoSampleStatus({
+          kind: 'error',
+          message: 'ピアノ音源を読み込めませんでした。通信状態を確認してください。',
+        });
+        return null;
+      }
     }
-
+    // A released touch or layout/source switch must not sound after decoding.
+    if (isCancelled()) return null;
     this.emitPianoSampleStatus(null);
     const startAt = Math.max(ctx.currentTime, now);
     const source = ctx.createBufferSource();
@@ -493,11 +544,22 @@ export class AudioEngine {
 
   private async runPianoSamplePreload(): Promise<void> {
     await this.ensureAudioContext();
-    const samples = getActivePianoSamples();
+    // Decode the commonly played central register first rather than file
+    // numbering (which starts at the bottom of the piano).
+    const samples = getActivePianoSamples().sort(
+      (a, b) => Math.abs(Math.log2(a.referenceFrequency / 261.625565)) -
+        Math.abs(Math.log2(b.referenceFrequency / 261.625565)),
+    );
     let nextIndex = 0;
 
     const worker = async () => {
       while (nextIndex < samples.length) {
+        // Stop background decoding as soon as performance resumes: decoding
+        // additional unrelated samples during a chord can stall the UI/audio.
+        if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
+          this.preloadNeedsResume = true;
+          break;
+        }
         const sample = samples[nextIndex];
         nextIndex += 1;
         if (!sample || this.decodedSampleCache.has(sample.id)) {
