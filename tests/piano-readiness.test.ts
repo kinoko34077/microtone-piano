@@ -38,6 +38,27 @@ test('released inputs are cancelled before late sample playback', async () => {
   );
 });
 
+test('pending cancellation survives async decode until source registration', async () => {
+  const audio = await read('src/core/audio.ts');
+  const on = section(audio, 'public async noteOn(', 'public noteOff(');
+  assert.match(on, /if \(pending\.cancelled \|\| epoch !== this\.voiceEpoch/);
+  assert.match(on, /source\.stop\(ctx\.currentTime\)/);
+  assert.match(on, /oscillator\.stop\(ctx\.currentTime\)/);
+  assert.ok(
+    on.indexOf('this.activeVoices.set(voiceId, voiceNode)') <
+    on.lastIndexOf('this.pendingVoices.delete(voiceId)'),
+    'pending tokens should survive through registration',
+  );
+});
+
+test('sample attack and decay use playback readiness time', async () => {
+  const audio = await read('src/core/audio.ts');
+  const on = section(audio, 'public async noteOn(', 'public noteOff(');
+  assert.match(on, /const playbackStart = Math\.max\(now, ctx\.currentTime\)/);
+  assert.match(on, /linearRampToValueAtTime\(velocityGain, playbackStart \+ attackTime\)/);
+  assert.match(on, /const decayEndTime = playbackStart \+ attackTime/);
+});
+
 test('background preloading yields to played chords and prefers central register', async () => {
   const audio = await read('src/core/audio.ts');
   const preload = section(audio, 'private async runPianoSamplePreload(', 'private async loadPianoSampleBuffer(');
