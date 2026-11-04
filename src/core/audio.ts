@@ -38,7 +38,9 @@ export class AudioEngine {
   private activeVoices: Map<string, VoiceNode> = new Map();
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
   private decodedSampleCache: Map<string, AudioBuffer> = new Map();
-  private warmingSampleIds: Set<string> = new Set();
+  private pendingVoices: Map<string, {address: number; cancelled: boolean}> = new Map();
+  private voiceEpoch = 0;
+  private preloadNeedsResume = false;
   private pianoPreloadPromise: Promise<void> | null = null;
   private pianoPreloadTimerId: number | null = null;
   private pendingVoiceCount = 0;
@@ -148,7 +150,8 @@ export class AudioEngine {
     pitchId: number,
     frequency: number,
     velocity: number = 1.0,
-    pointerId?: number | string
+    pointerId?: number | string,
+    shouldStart?: () => boolean,
   ): Promise<string> {
     if (!isValidFrequencyValue(frequency)) {
       const timestamp = Date.now();
@@ -163,6 +166,9 @@ export class AudioEngine {
     }
 
     const ctx = await this.ensureAudioContext();
+    if (shouldStart?.() === false) {
+      return `cancelled_${address}_${pitchId}_${Date.now()}`;
+    }
     const now = ctx.currentTime;
 
     if (isFrequencyOutOfRecommendedRange(frequency) && this.onOutOfRangeCallback) {
@@ -196,8 +202,15 @@ export class AudioEngine {
       this.schedulePianoPreload();
     }
 
+    const pending = {address, cancelled: false};
+    const epoch = this.voiceEpoch;
+    this.pendingVoices.set(voiceId, pending);
     this.pendingVoiceCount += 1;
-    const sources = await this.createSourcesForVoice(ctx, frequency, voiceGain, now).finally(() => {
+    const sources = await this.createSourcesForVoice(
+      ctx, frequency, voiceGain, now,
+      () => pending.cancelled || epoch !== this.voiceEpoch || shouldStart?.() === false,
+    ).finally(() => {
+      this.pendingVoices.delete(voiceId);
       this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
     });
     if (!sources) {
@@ -249,6 +262,8 @@ export class AudioEngine {
   }
 
   public noteOff(voiceId: string) {
+    const pending = this.pendingVoices.get(voiceId);
+    if (pending) pending.cancelled = true;
     const voice = this.activeVoices.get(voiceId);
     if (!voice || !this.ctx) {
       return;
@@ -264,6 +279,9 @@ export class AudioEngine {
   }
 
   public noteOffByAddress(address: number) {
+    for (const pending of this.pendingVoices.values()) {
+      if (pending.address === address) pending.cancelled = true;
+    }
     if (!this.ctx) {
       return;
     }
@@ -284,6 +302,8 @@ export class AudioEngine {
   }
 
   public allNotesOff() {
+    this.voiceEpoch += 1;
+    for (const pending of this.pendingVoices.values()) pending.cancelled = true;
     if (!this.ctx) {
       return;
     }
@@ -315,6 +335,10 @@ export class AudioEngine {
 
     this.pianoPreloadPromise = this.runPianoSamplePreload().finally(() => {
       this.pianoPreloadPromise = null;
+      if (this.preloadNeedsResume) {
+        this.preloadNeedsResume = false;
+        this.schedulePianoPreload();
+      }
     });
     return this.pianoPreloadPromise;
   }
@@ -390,10 +414,12 @@ export class AudioEngine {
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
-    now: number
+    now: number,
+    isCancelled: () => boolean,
   ): Promise<(Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}) | null> {
+    if (isCancelled()) return null;
     if (this.soundSource === 'piano') {
-      return this.createPianoSources(ctx, frequency, gainNode, now);
+      return this.createPianoSources(ctx, frequency, gainNode, now, isCancelled);
     }
 
     const osc = ctx.createOscillator();
@@ -412,7 +438,8 @@ export class AudioEngine {
     ctx: AudioContext,
     frequency: number,
     gainNode: GainNode,
-    now: number
+    now: number,
+    isCancelled: () => boolean,
   ): Promise<(Pick<VoiceNode, 'oscillators' | 'sourceNodes'> & {naturalDurationMs?: number}) | null> {
     const sample = findNearestPianoSample(frequency);
     if (!sample) {
@@ -423,38 +450,26 @@ export class AudioEngine {
       return null;
     }
 
-    const buffer = this.decodedSampleCache.get(sample.id);
+    // Always use the requested piano sample; do not replace its timbre with
+    // an oscillator. Sample loads share one promise per unique sample ID.
+    let buffer = this.decodedSampleCache.get(sample.id);
     if (!buffer) {
-      // Never await a network/decode operation in the live chord path: the
-      // temporary oscillator starts immediately while the actual sample warms.
       this.emitPianoSampleStatus({
         kind: 'loading',
-        message: 'ピアノ音源を準備中です。この音は一時的な代替音で再生しています。',
+        message: 'ピアノ音源を準備中です。',
       });
-      this.warmingSampleIds.add(sample.id);
-      void this.loadPianoSampleBuffer(sample).then(
-        () => {
-          this.warmingSampleIds.delete(sample.id);
-          if (this.warmingSampleIds.size === 0) {
-            this.emitPianoSampleStatus(null);
-          }
-        },
-        () => {
-          this.warmingSampleIds.delete(sample.id);
-          this.emitPianoSampleStatus({
-            kind: 'error',
-            message: 'ピアノ音源を読み込めませんでした。通信状態を確認してもう一度お試しください。',
-          });
-        },
-      );
-      const fallback = ctx.createOscillator();
-      fallback.type = 'triangle';
-      fallback.frequency.setValueAtTime(frequency, now);
-      fallback.connect(gainNode);
-      fallback.start(now);
-      return {oscillators: [fallback], sourceNodes: []};
+      try {
+        buffer = await this.loadPianoSampleBuffer(sample);
+      } catch {
+        this.emitPianoSampleStatus({
+          kind: 'error',
+          message: 'ピアノ音源を読み込めませんでした。通信状態を確認してください。',
+        });
+        return null;
+      }
     }
-
+    // A released touch or layout/source switch must not sound after decoding.
+    if (isCancelled()) return null;
     this.emitPianoSampleStatus(null);
     const startAt = Math.max(ctx.currentTime, now);
     const source = ctx.createBufferSource();
@@ -493,11 +508,22 @@ export class AudioEngine {
 
   private async runPianoSamplePreload(): Promise<void> {
     await this.ensureAudioContext();
-    const samples = getActivePianoSamples();
+    // Decode the commonly played central register first rather than file
+    // numbering (which starts at the bottom of the piano).
+    const samples = getActivePianoSamples().sort(
+      (a, b) => Math.abs(Math.log2(a.referenceFrequency / 261.625565)) -
+        Math.abs(Math.log2(b.referenceFrequency / 261.625565)),
+    );
     let nextIndex = 0;
 
     const worker = async () => {
       while (nextIndex < samples.length) {
+        // Stop background decoding as soon as performance resumes: decoding
+        // additional unrelated samples during a chord can stall the UI/audio.
+        if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
+          this.preloadNeedsResume = true;
+          break;
+        }
         const sample = samples[nextIndex];
         nextIndex += 1;
         if (!sample || this.decodedSampleCache.has(sample.id)) {
