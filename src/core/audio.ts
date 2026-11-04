@@ -195,7 +195,6 @@ export class AudioEngine {
     const velocityGain = Math.max(0.1, Math.min(1.0, velocity)) * 0.6;
 
     voiceGain.gain.setValueAtTime(0.0001, now);
-    voiceGain.gain.linearRampToValueAtTime(velocityGain, now + attackTime);
     voiceGain.connect(this.masterGain!);
 
     if (this.soundSource === 'piano') {
@@ -238,6 +237,12 @@ export class AudioEngine {
         return;
       }
 
+      // An uncached sample may complete well after the original key event.
+      // Start attack/decay from when the real audio is ready, not that event.
+      const playbackStart = Math.max(now, ctx.currentTime);
+      voiceGain.gain.setValueAtTime(0.0001, playbackStart);
+      voiceGain.gain.linearRampToValueAtTime(velocityGain, playbackStart + attackTime);
+
       const voiceNode: VoiceNode = {
         voiceId,
         address,
@@ -248,11 +253,11 @@ export class AudioEngine {
         sourceNodes,
         isSustained: this.isSustainActive,
         isReleased: false,
-        startTime: now,
+        startTime: playbackStart,
       };
 
       if (this.noteDecayMs > 0) {
-        const decayEndTime = now + attackTime + this.noteDecayMs / 1000;
+        const decayEndTime = playbackStart + attackTime + this.noteDecayMs / 1000;
         voiceGain.gain.exponentialRampToValueAtTime(0.0001, decayEndTime);
         voiceNode.decayTimeoutId = window.setTimeout(() => {
           if (!this.activeVoices.has(voiceId) || !this.ctx) {
