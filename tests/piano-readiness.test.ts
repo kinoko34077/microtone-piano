@@ -12,47 +12,46 @@ function section(source: string, start: string, end: string): string {
   return source.slice(startIndex, endIndex);
 }
 
-test('uncached piano starts fallback immediately while warming sample asynchronously', async () => {
-  const source = await read('src/core/audio.ts');
-  const piano = section(source, 'private async createPianoSources(', 'private async runPianoSamplePreload');
-
-  assert.match(source, /export type PianoSampleStatus/);
-  assert.match(source, /setPianoSampleStatusCallback/);
+test('uncached keys use the actual piano sample, never an oscillator fallback', async () => {
+  const audio = await read('src/core/audio.ts');
+  const piano = section(audio, 'private async createPianoSources(', 'private lastPianoSampleStatus:');
   assert.match(piano, /kind: 'loading'/);
-  assert.match(piano, /void this\.loadPianoSampleBuffer\(sample\)\.then/);
-  assert.match(piano, /const fallback = ctx\.createOscillator\(\)/);
-  assert.match(piano, /fallback\.start\(now\)/);
-  assert.match(piano, /return \{oscillators: \[fallback\], sourceNodes: \[\]\}/);
-  assert.doesNotMatch(piano, /await this\.loadPianoSampleBuffer\(sample\)/);
+  assert.match(piano, /await this\.loadPianoSampleBuffer\(sample\)/);
+  assert.match(piano, /source\.buffer = buffer/);
+  assert.match(piano, /source\.start\(startAt\)/);
+  assert.doesNotMatch(piano, /createOscillator\(/);
 });
 
-test('failed sample preparation reports error without delaying the initial fallback voice', async () => {
-  const source = await read('src/core/audio.ts');
-  const piano = section(source, 'private async createPianoSources(', 'private async runPianoSamplePreload');
-
-  assert.match(piano, /kind: 'error'/);
-  assert.match(piano, /kind: 'loading'/);
-  assert.match(piano, /this\.warmingSampleIds\.delete\(sample\.id\)/);
-  assert.doesNotMatch(piano, /elapsed > MAX_PIANO_START_LATENCY_SECONDS/);
+test('released inputs are cancelled before late sample playback', async () => {
+  const audio = await read('src/core/audio.ts');
+  const on = section(audio, 'public async noteOn(', 'public noteOff(');
+  const off = section(audio, 'public noteOff(', 'public getActiveVoices()');
+  const piano = section(audio, 'private async createPianoSources(', 'private lastPianoSampleStatus:');
+  assert.match(on, /this\.pendingVoices\.set\(voiceId, pending\)/);
+  assert.match(on, /void \(async \(\) => \{/);
+  assert.match(on, /return voiceId;/);
+  assert.match(off, /pending\.cancelled = true/);
+  assert.match(piano, /if \(isCancelled\(\)\) return null/);
+  assert.ok(
+    piano.indexOf('if (isCancelled()) return null') < piano.indexOf('source.start(startAt)'),
+    'released notes must not start after sample decoding',
+  );
 });
 
-test('completed background loads clear the loading status only after the last sample', async () => {
-  const source = await read('src/core/audio.ts');
-  const piano = section(source, 'private async createPianoSources(', 'private async runPianoSamplePreload');
-  assert.match(source, /private warmingSampleIds: Set<string>/);
-  assert.match(piano, /this\.warmingSampleIds\.add\(sample\.id\)/);
-  assert.match(piano, /if \(this\.warmingSampleIds\.size === 0\)/);
-  assert.match(piano, /this\.emitPianoSampleStatus\(null\)/);
+test('background preloading yields to played chords and prefers central register', async () => {
+  const audio = await read('src/core/audio.ts');
+  const preload = section(audio, 'private async runPianoSamplePreload(', 'private async loadPianoSampleBuffer(');
+  assert.match(preload, /Math\.log2\(a\.referenceFrequency/);
+  assert.match(preload, /this\.activeVoices\.size > 0 \|\| this\.pendingVoiceCount > 0/);
+  assert.match(preload, /this\.preloadNeedsResume = true/);
 });
 
-test('successful piano start clears stale readiness warnings', async () => {
-  const source = await read('src/core/audio.ts');
-  const piano = section(source, 'private async createPianoSources(', 'private async runPianoSamplePreload');
-
+test('successful piano playback clears readiness warnings', async () => {
+  const audio = await read('src/core/audio.ts');
+  const piano = section(audio, 'private async createPianoSources(', 'private lastPianoSampleStatus:');
   assert.match(piano, /this\.emitPianoSampleStatus\(null\)/);
   assert.ok(
     piano.lastIndexOf('this.emitPianoSampleStatus(null)') < piano.indexOf('source.start(startAt)'),
-    'status should clear when the current sample is ready to start',
   );
 });
 
