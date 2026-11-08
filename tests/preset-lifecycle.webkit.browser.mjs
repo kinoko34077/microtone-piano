@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawn } from 'node:child_process';
 import { webkit } from 'playwright';
+import {readFile} from 'node:fs/promises';
+import {gzipSync,gunzipSync} from 'node:zlib';
 
 // #24: Fresh isolated WebKit contexts only. This does NOT test physical iPhone Safari.
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -182,6 +184,68 @@ test('#24 WebKit: same invalid file may be selected twice without changing prese
     assert.deepEqual(errors, []);
     await context.close();
     console.log('WEBKIT_INVALID_RESELECT_PASS', dialogs);
+  } finally {
+    await browser?.close();
+    server.kill('SIGTERM');
+  }
+});
+
+
+test('#34 Linux WebKit: real compressed BIN download and imported preset roundtrip', {timeout: 150000}, async () => {
+  const port = 8798;
+  const server = await startPreview(port);
+  let browser;
+  try {
+    browser = await webkit.launch({headless: true});
+    const context = await browser.newContext({
+      viewport: {width: 390, height: 844},
+      acceptDownloads: true,
+    });
+    const page = await context.newPage();
+    const errors = [];
+    const dialogs = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('dialog', async dialog => {dialogs.push(dialog.message()); await dialog.dismiss();});
+    await page.goto('http://127.0.0.1:' + port + '/');
+    await openMenu(page);
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', {timeout: 25000}),
+      page.getByRole('button', {name: 'BIN', exact: true}).click(),
+    ]);
+    const bytes = await readFile(await download.path());
+    assert.equal(bytes.subarray(0, 4).toString(), 'MMPK');
+    assert.equal(bytes[4], 1);
+    const data = JSON.parse(gunzipSync(bytes.subarray(12)).toString('utf8'));
+    assert.equal(data.type, 'MultiMicrotonalPackage');
+    assert.equal(data.layoutPreset.mapping.length, 256);
+    const changed = structuredClone(data);
+    changed.layoutPreset.name = 'WebKit gzip imported layout';
+    changed.tuningPreset.name = 'WebKit gzip imported tuning';
+    const raw = Buffer.from(JSON.stringify(changed), 'utf8');
+    const header = Buffer.alloc(12);
+    header.write('MMPK', 0, 'ascii');
+    header[4] = 1;
+    header[5] = 1;
+    header.writeUInt32LE(raw.length, 8);
+    await page.locator('input[type="file"][accept=".json,.bin"]').setInputFiles({
+      name: 'webkit-roundtrip.bin',
+      mimeType: 'application/octet-stream',
+      buffer: Buffer.concat([header, gzipSync(raw)]),
+    });
+    await page.waitForFunction(() => document.querySelector('input[type="file"]')?.files.length === 0);
+
+    const [jsonDownload] = await Promise.all([
+      page.waitForEvent('download', {timeout: 25000}),
+      page.getByRole('button', {name: 'JSON', exact: true}).click(),
+    ]);
+    const imported = JSON.parse(await readFile(await jsonDownload.path(), 'utf8'));
+    assert.equal(imported.layoutPreset.name, changed.layoutPreset.name);
+    assert.equal(imported.tuningPreset.name, changed.tuningPreset.name);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(dialogs, []);
+    console.log('WEBKIT_GZIP_BIN_ROUNDTRIP_PASS', JSON.stringify({binBytes: bytes.length}));
+    await context.close();
   } finally {
     await browser?.close();
     server.kill('SIGTERM');
