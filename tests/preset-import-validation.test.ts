@@ -4,9 +4,13 @@ import test from 'node:test';
 
 import {
   STANDARD_LAYOUT_12EDO,
+  STANDARD_LAYOUT_256TEST,
   STANDARD_TUNING_12EDO,
+  STANDARD_TUNING_256TEST,
 } from '../src/core/presets';
-import {calculateFrequency, isValidFrequencyValue} from '../src/core/pitch';
+import {calculateFrequency, encodePitchReference, isValidFrequencyValue} from '../src/core/pitch';
+import {encodeCompressedPreset, decodePresetBytes, MAX_JSON_PRESET_BYTES} from '../src/core/binaryPackage';
+import {StorageService} from '../src/core/storage';
 import {
   validateLayoutPresetData,
   validatePresetImport,
@@ -168,4 +172,94 @@ test('#21 invalid import retains previous presets and always clears the file sel
   assert.match(handler, /if \('error' in admission\)\s*\{[\s\S]*?return;/);
   assert.match(handler, /\} finally \{[\s\S]*?fileInputRef\.current\.value = ''/);
   assert.ok(handler.indexOf('} finally {') > handler.indexOf('} catch (error: unknown)'));
+});
+
+
+test('#34 new gzip BIN has versioned header and preserves 256-slot/255-pitch package exactly', async () => {
+  const layout = clone(STANDARD_LAYOUT_256TEST);
+  const tuning = clone(STANDARD_TUNING_256TEST);
+  layout.mapping[0] = -1; // original unassigned sentinel
+  layout.mapping[1] = encodePitchReference(1, -3);
+  layout.mapping[2] = encodePitchReference(254, 5);
+  tuning.pitches[0] = {id: 0, name: '試験周波数', type: 'frequency', frequency: 0.00000123456789};
+  tuning.pitches[1] = {id: 1, name: '比率', type: 'ratio', numerator: 1000003, denominator: 1000009};
+  const packageData = {
+    type: 'MultiMicrotonalPackage',
+    version: '1.0',
+    timestamp: '2026-11-09T00:00:00.000Z',
+    layoutPreset: layout,
+    tuningPreset: tuning,
+  };
+  const compressed = await encodeCompressedPreset(packageData);
+  assert.equal(new TextDecoder().decode(compressed.subarray(0, 4)), 'MMPK');
+  assert.equal(compressed[4], 1);
+  assert.equal(compressed[5], 1);
+  assert.equal(compressed[6], 0);
+  assert.equal(compressed[7], 0);
+  assert.equal(new DataView(compressed.buffer).getUint32(8, true), new TextEncoder().encode(JSON.stringify(packageData)).length);
+  assert.ok(compressed.byteLength < new TextEncoder().encode(JSON.stringify(packageData)).byteLength, 'this representative 256-slot package should compress');
+  const decoded = await decodePresetBytes(compressed);
+  assert.deepEqual(decoded, packageData);
+  assert.equal(validatePresetImport(decoded, tuning).ok, true);
+});
+
+test('#34 old UTF-8 JSON BIN, readable JSON, standalone presets and new BIN share validation', async () => {
+  const layout = clone(STANDARD_LAYOUT_12EDO);
+  const tuning = clone(STANDARD_TUNING_12EDO);
+  for (const original of [
+    layout,
+    tuning,
+    {type: 'MultiMicrotonalPackage', version: '1.0', layoutPreset: layout, tuningPreset: tuning},
+  ]) {
+    const legacyBytes = new TextEncoder().encode(JSON.stringify(original));
+    const legacyParsed = await decodePresetBytes(legacyBytes);
+    assert.deepEqual(legacyParsed, original);
+    assert.equal(validatePresetImport(legacyParsed, tuning).ok, true);
+    const modernParsed = await decodePresetBytes(await encodeCompressedPreset(original));
+    assert.deepEqual(modernParsed, original);
+    assert.equal(validatePresetImport(modernParsed, tuning).ok, true);
+  }
+});
+
+test('#34 StorageService imports new BIN and legacy .bin without using file extension for decoding', async () => {
+  const layout = clone(STANDARD_LAYOUT_12EDO);
+  const binary = await encodeCompressedPreset(layout);
+  const service = new StorageService();
+  const asFile = (bytes: Uint8Array, name: string): File => {
+    const blob = new Blob([bytes]);
+    return {name, size: blob.size, arrayBuffer: () => blob.arrayBuffer()} as File;
+  };
+  assert.deepEqual(await service.importFromFile(asFile(binary, 'unexpected.json')), layout);
+  assert.deepEqual(await service.importFromFile(asFile(new TextEncoder().encode(JSON.stringify(layout)), 'legacy.bin')), layout);
+});
+
+test('#34 reject malformed or future MMPK headers, corrupt gzip, declared size drift and invalid JSON', async () => {
+  const valid = await encodeCompressedPreset({type: 'MultiMicrotonalPackage', version: '1.0', layoutPreset: clone(STANDARD_LAYOUT_12EDO)});
+  const withChange = (mutate: (bytes: Uint8Array) => void) => {
+    const changed = valid.slice();
+    mutate(changed);
+    return changed;
+  };
+  await assert.rejects(decodePresetBytes(valid.slice(0, 6)), /ヘッダー/);
+  await assert.rejects(decodePresetBytes(withChange((bytes) => { bytes[4] = 2; })), /ヘッダー/);
+  await assert.rejects(decodePresetBytes(withChange((bytes) => { bytes[5] = 99; })), /ヘッダー/);
+  await assert.rejects(decodePresetBytes(withChange((bytes) => { bytes[7] = 1; })), /ヘッダー/);
+  await assert.rejects(decodePresetBytes(withChange((bytes) => {
+    new DataView(bytes.buffer).setUint32(8, MAX_JSON_PRESET_BYTES + 1, true);
+  })), /64MiB/);
+  await assert.rejects(decodePresetBytes(withChange((bytes) => {
+    new DataView(bytes.buffer).setUint32(8, 1, true);
+  })), /サイズ/);
+  await assert.rejects(decodePresetBytes(withChange((bytes) => {
+    bytes[bytes.length - 1] ^= 0xff;
+  })), /gzip|破損|展開/);
+  await assert.rejects(decodePresetBytes(new TextEncoder().encode('{bad json')), /SyntaxError|JSON|property name/i);
+});
+
+test('#34 all available codec paths retain editor errors and same-file retry in Sidebar', async () => {
+  const source = await readFile(new URL('../src/components/Sidebar.tsx', import.meta.url), 'utf8');
+  assert.match(source, /await storageService\.exportAsBinaryPackage/);
+  assert.match(source, /BINの書き出しに失敗しました/);
+  assert.match(source, /validatePresetImport\(data, currentTuning\)/);
+  assert.match(source, /fileInputRef\.current\.value = ''/);
 });
