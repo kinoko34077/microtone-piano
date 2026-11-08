@@ -5,6 +5,7 @@
 import { LayoutPreset, TuningPreset, AppSettings } from '../types/keyboard';
 import { ALL_STANDARD_LAYOUTS, ALL_STANDARD_TUNINGS } from './presets';
 import {validateLayoutPresetData, validateTuningPresetData} from './presetValidation';
+import {decodePresetBytes, encodeCompressedPreset, MAX_JSON_PRESET_BYTES} from './binaryPackage';
 
 const DB_NAME = 'MultiMicrotonalKeyboardDB';
 const DB_VERSION = 1;
@@ -261,53 +262,32 @@ export class StorageService {
   }
 
   /**
-   * 圧縮バイナリ形式 (JSON文字列のUTF-8 Byte + Base64化) でダウンロード
+   * Versioned, genuinely gzip-compressed .bin package. Does not change
+   * IndexedDB storage or the human-editable JSON export contract.
    */
-  public exportAsBinaryPackage(data: unknown, filename: string) {
-    const jsonStr = JSON.stringify(data);
-    const encoder = new TextEncoder();
-    const bytes = encoder.encode(jsonStr);
-    
-    // Base64またはArrayBuffer直接保存
-    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  public async exportAsBinaryPackage(data: unknown, filename: string): Promise<void> {
+    const bytes = await encodeCompressedPreset(data);
+    const blob = new Blob([bytes], {type: 'application/octet-stream'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename.endsWith('.bin') ? filename : `${filename}.bin`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Allow the browser to begin the download before releasing the object URL.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   /**
-   * JSONまたはバイナリファイルを読み込み
+   * Content-sniffing import of new gzip BIN, old UTF-8 JSON BIN, or JSON.
+   * Validation and state admission remain with validatePresetImport().
    */
   public async importFromFile(file: File): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      if (file.name.endsWith('.bin')) {
-        reader.readAsArrayBuffer(file);
-        reader.onload = () => {
-          try {
-            const decoder = new TextDecoder('utf-8');
-            const jsonStr = decoder.decode(reader.result as ArrayBuffer);
-            resolve(JSON.parse(jsonStr));
-          } catch (e) {
-            reject(new Error('バイナリデータの解読に失敗しました。'));
-          }
-        };
-      } else {
-        reader.readAsText(file);
-        reader.onload = () => {
-          try {
-            resolve(JSON.parse(reader.result as string));
-          } catch (e) {
-            reject(new Error('JSONの解析に失敗しました。'));
-          }
-        };
-      }
-      reader.onerror = () => reject(reader.error);
-    });
+    if (file.size > MAX_JSON_PRESET_BYTES) {
+      throw new Error('プリセットファイルが64MiBを超えています。');
+    }
+    return decodePresetBytes(new Uint8Array(await file.arrayBuffer()));
   }
+
   /**
    * プリセットの完全ディープクローン (参照切断)
    */
