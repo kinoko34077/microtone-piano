@@ -3,7 +3,7 @@ import {LayoutPreset, TuningPreset, AppSettings, LaneConfig} from '../../types/k
 import {encodeAddress, isPlayableAddress} from '../../core/address';
 import {calculateFrequency, getFormattedPitchLabel, resolvePitch} from '../../core/pitch';
 import {globalAudioEngine} from '../../core/audio';
-import {getDepthFromBoundaries, getLaneBoundaries, getSegmentHeightsFromBoundaries} from '../../core/laneBoundaries';
+import {getLaneDisplaySegments, getDepthFromDisplaySegments} from '../../core/laneBoundaries';
 import {getKeyboardColumnRange} from '../../core/keyboardRange';
 
 interface InteractiveKeyboardProps {
@@ -31,12 +31,6 @@ type PendingPointerMove = {
   clientX: number;
   clientY: number;
   pressure: number;
-};
-
-type SegmentRenderInfo = {
-  depth: number;
-  heightPercent: number;
-  isInvalid: boolean;
 };
 
 const OVERSCAN_COLUMNS = 1;
@@ -130,11 +124,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
             return encodeAddress(
               x,
               true,
-              calculateDepthFromRatio(
+              getDepthFromDisplaySegments(
                 relY / blackHeight,
-                activeDepths,
-                lane ? getLaneBoundaries(layout, lane, true) : [0, 1],
-                settings.showInvalidSections,
+                getLaneDisplaySegments(layout, lane, true, settings.showInvalidSections),
               ),
             );
           }
@@ -148,11 +140,9 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         return encodeAddress(
           whiteXIndex,
           false,
-          calculateDepthFromRatio(
+          getDepthFromDisplaySegments(
             relY / totalHeight,
-            activeDepths,
-            lane ? getLaneBoundaries(layout, lane, false) : [0, 1],
-            settings.showInvalidSections,
+            getLaneDisplaySegments(layout, lane, false, settings.showInvalidSections),
           ),
         );
       }
@@ -426,7 +416,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     const absoluteColumn = startColumn + x;
     const octOffset = Math.floor(absoluteColumn / period);
     const baseX = positiveModulo(absoluteColumn, period);
-    const segments = getRenderedSegments(activeDepths, lane, layout, false, settings.showInvalidSections);
+    const segments = getLaneDisplaySegments(layout, lane, false, settings.showInvalidSections);
 
     return (
       <div
@@ -495,7 +485,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     const blackWidth = settings.keyWidth * settings.blackKeyWidthRatio;
     const center = (x + 1) * settings.keyWidth;
     const blackLeft = center - blackWidth / 2;
-    const segments = getRenderedSegments(activeDepths, lane, layout, true, settings.showInvalidSections);
+    const segments = getLaneDisplaySegments(layout, lane, true, settings.showInvalidSections);
 
     return (
       <div
@@ -600,53 +590,6 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     </div>
   );
 };
-
-function getRenderedSegments(
-  activeDepths: number,
-  lane: LaneConfig | undefined,
-  layout: LayoutPreset,
-  isBlack: boolean,
-  showInvalidSections: boolean,
-): SegmentRenderInfo[] {
-  if (showInvalidSections) {
-    return Array.from({length: 8}, (_, index) => ({
-      depth: 7 - index,
-      heightPercent: 12.5,
-      isInvalid: 7 - index >= activeDepths,
-    }));
-  }
-
-  if (activeDepths <= 0) {
-    return [];
-  }
-
-  const heights = getSegmentHeightsFromBoundaries(getLaneBoundaries(layout, lane, isBlack));
-  return Array.from({length: activeDepths}, (_, index) => ({
-    depth: activeDepths - 1 - index,
-    heightPercent: heights[index] * 100,
-    isInvalid: false,
-  }));
-}
-
-function calculateDepthFromRatio(
-  topRatio: number,
-  activeDepths: number,
-  boundaries: number[],
-  showInvalidSections: boolean,
-): number {
-  if (activeDepths <= 0) {
-    return 0;
-  }
-
-  const clampedTopRatio = Math.max(0, Math.min(0.9999, topRatio));
-
-  if (showInvalidSections) {
-    const idxFromTop = Math.floor(clampedTopRatio * 8);
-    return Math.max(0, Math.min(7, 7 - idxFromTop));
-  }
-
-  return getDepthFromBoundaries(clampedTopRatio, activeDepths, boundaries);
-}
 
 function positiveModulo(value: number, modulo: number): number {
   return ((value % modulo) + modulo) % modulo;
