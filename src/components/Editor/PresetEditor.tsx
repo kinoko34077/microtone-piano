@@ -14,7 +14,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import {AppSettings, LayoutPreset, PitchDefinition, PitchType, TuningPreset} from '../../types/keyboard';
-import {decodeAddress, encodeAddress, getAddressLabel} from '../../core/address';
+import {decodeAddress, encodeAddress, getAddressLabel, isPlayableAddress} from '../../core/address';
 import {
   calculateFrequency,
   encodePitchReference,
@@ -204,6 +204,7 @@ export const PresetEditor: React.FC<PresetEditorProps> = ({
   }, [displayHorizontalCount, layout.lanes]);
 
   const previewAddress = async (address: number) => {
+    if (!isPlayableAddress(layout, address)) return;
     const pitchRef = layout.mapping[address];
     const {pitchDef, octaveShift} = resolvePitch(pitchRef, tuning);
     if (!pitchDef) {
