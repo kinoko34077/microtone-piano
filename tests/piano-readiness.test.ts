@@ -16,7 +16,7 @@ test('uncached keys use the actual piano sample, never an oscillator fallback', 
   const audio = await read('src/core/audio.ts');
   const piano = section(audio, 'private async createPianoSources(', 'private lastPianoSampleStatus:');
   assert.match(piano, /kind: 'loading'/);
-  assert.match(piano, /await this\.loadPianoSampleBuffer\(sample\)/);
+  assert.match(piano, /await this\.loadPianoSampleBuffer\(sample, ctx\)/);
   assert.match(piano, /source\.buffer = buffer/);
   assert.match(piano, /source\.start\(startAt\)/);
   assert.doesNotMatch(piano, /createOscillator\(/);
