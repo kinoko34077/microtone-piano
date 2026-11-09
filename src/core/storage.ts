@@ -186,11 +186,11 @@ export class StorageService {
     }
     if (layout) {
       const result = validateLayoutPresetData(layout);
-      if (!result.ok) throw new Error(`配置プリセットが不正です: ${result.error}`);
+      if ('error' in result) throw new Error(`配置プリセットが不正です: ${result.error}`);
     }
     if (tuning) {
       const result = validateTuningPresetData(tuning);
-      if (!result.ok) throw new Error(`音高プリセットが不正です: ${result.error}`);
+      if ('error' in result) throw new Error(`音高プリセットが不正です: ${result.error}`);
     }
 
     const db = await this.initDB();
