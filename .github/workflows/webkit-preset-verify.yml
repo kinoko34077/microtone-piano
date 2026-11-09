@@ -8,6 +8,7 @@ on:
       - "src/App.tsx"
       - "src/components/Sidebar.tsx"
       - "src/core/storage.ts"
+      # #28: saver changes must rerun the IndexedDB durability lifecycle checks.
       - "src/core/debouncedSettingsSaver.ts"
   workflow_dispatch:
 
