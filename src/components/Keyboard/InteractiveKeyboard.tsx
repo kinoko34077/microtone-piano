@@ -421,6 +421,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     return (
       <div
         key={`white_${x}`}
+        data-key-color="white"
+        data-key-column={x}
         className="relative flex h-full flex-col select-none rounded-b-md border-r border-slate-400/80 bg-white shadow-[inset_-1px_0_2px_rgba(0,0,0,0.1)]"
         style={{width: `${settings.keyWidth}px`, flexShrink: 0}}
       >
@@ -438,6 +440,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`white_${x}_depth_${depth}`}
+              data-depth={depth}
+              data-invalid={isInvalid}
               className={`relative flex flex-col justify-end border-b border-slate-200 p-1 ${
                 isPressed
                   ? 'bg-gradient-to-b from-amber-300 to-amber-400 text-amber-950 shadow-inner'
@@ -490,6 +494,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     return (
       <div
         key={`black_lane_${x}`}
+        data-key-color="black"
+        data-key-column={x}
         className="absolute top-0 z-10 flex select-none flex-col overflow-hidden rounded-b-md border-x border-b border-slate-800 bg-gradient-to-b from-slate-900 to-black shadow-2xl"
         style={{
           left: `${blackLeft}px`,
@@ -511,6 +517,8 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
           return (
             <div
               key={`black_${x}_depth_${depth}`}
+              data-depth={depth}
+              data-invalid={isInvalid}
               className={`relative flex flex-col justify-end border-b border-slate-800 p-0.5 ${
                 isPressed
                   ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-inner'
