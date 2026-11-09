@@ -169,6 +169,7 @@ export default function App() {
       settings.pitchLabelMode,
       settings.showAddressBinary,
       settings.showInvalidSections,
+      settings.soundSource,
     ],
   );
   const upperKeyboardSettings = useMemo(
@@ -783,6 +784,7 @@ export default function App() {
                     onMaxScrollOffsetChange={setUpperMaxScrollOffset}
                     externalPressedAddresses={pressedAddressSet}
                     initialFocusColumn={upperInitialFocusColumn}
+                    preloadGroupId="upper"
                   />
                 </div>
               </div>
@@ -809,6 +811,7 @@ export default function App() {
                   onMaxScrollOffsetChange={setLowerMaxScrollOffset}
                   externalPressedAddresses={pressedAddressSet}
                   initialFocusColumn={lowerInitialFocusColumn}
+                  preloadGroupId="lower"
                 />
               </div>
             </div>
