@@ -12,6 +12,7 @@ on:
       - "tests/active-section.test.ts"
       - "tests/piano-readiness.test.ts"
       - "tests/audio-pending-burst.browser.mjs"
+      - "tests/audio-real-sample-chord.browser.mjs"
       - ".github/workflows/piano-readiness.yml"
   push:
     branches:
@@ -26,6 +27,7 @@ on:
       - "tests/active-section.test.ts"
       - "tests/piano-readiness.test.ts"
       - "tests/audio-pending-burst.browser.mjs"
+      - "tests/audio-real-sample-chord.browser.mjs"
       - ".github/workflows/piano-readiness.yml"
 
 permissions:
@@ -51,3 +53,5 @@ jobs:
         run: npm install --no-save --no-package-lock puppeteer-core@24
       - name: Exercise actual audio module with controlled pending sample stress
         run: node --test tests/audio-pending-burst.browser.mjs
+      - name: Measure real M4A chord cold/warm scheduling without audio code changes
+        run: node --test tests/audio-real-sample-chord.browser.mjs
