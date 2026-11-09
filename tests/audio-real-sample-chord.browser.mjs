@@ -68,26 +68,52 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
             const originalDecode = ctx.decodeAudioData.bind(ctx);
             const originalBufferSource = ctx.createBufferSource.bind(ctx);
             const originalFetch = window.fetch.bind(window);
-            const observed = {fetch: [], decode: [], start: []};
+            const observed = {fetch: [], body: [], decode: [], start: [],
+              peakFetches: 0, peakBodies: 0, peakDecodes: 0};
+            let activeFetches = 0;
+            let activeBodies = 0;
+            let activeDecodes = 0;
 
             window.fetch = async (...args) => {
               const url = String(args[0]);
+              const isSample = url.includes('.m4a');
               const at = performance.now();
+              if (isSample) {
+                activeFetches++;
+                observed.peakFetches = Math.max(observed.peakFetches, activeFetches);
+              }
               try {
                 const response = await originalFetch(...args);
-                if (url.includes('.m4a')) {
+                if (isSample) {
                   observed.fetch.push({url, ms: performance.now() - at, status: response.status});
+                  const originalArrayBuffer = response.arrayBuffer.bind(response);
+                  response.arrayBuffer = async (...bodyArgs) => {
+                    const bodyAt = performance.now();
+                    activeBodies++;
+                    observed.peakBodies = Math.max(observed.peakBodies, activeBodies);
+                    try {
+                      const data = await originalArrayBuffer(...bodyArgs);
+                      observed.body.push({url, ms: performance.now() - bodyAt, bytes: data.byteLength});
+                      return data;
+                    } finally {
+                      activeBodies--;
+                    }
+                  };
                 }
                 return response;
               } catch (error) {
-                if (url.includes('.m4a')) {
+                if (isSample) {
                   observed.fetch.push({url, ms: performance.now() - at, error: String(error)});
                 }
                 throw error;
+              } finally {
+                if (isSample) activeFetches--;
               }
             };
             ctx.decodeAudioData = async (...args) => {
               const at = performance.now();
+              activeDecodes++;
+              observed.peakDecodes = Math.max(observed.peakDecodes, activeDecodes);
               try {
                 const buffer = await originalDecode(...args);
                 observed.decode.push({ms: performance.now() - at,
@@ -97,6 +123,8 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
               } catch (error) {
                 observed.decode.push({ms: performance.now() - at, error: String(error)});
                 throw error;
+              } finally {
+                activeDecodes--;
               }
             };
             ctx.createBufferSource = (...args) => {
@@ -114,6 +142,7 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
             for (const phaseName of ['cold', 'warm']) {
               const startIndex = observed.start.length;
               const fetchIndex = observed.fetch.length;
+              const bodyIndex = observed.body.length;
               const decodeIndex = observed.decode.length;
               const eventTime = performance.now();
               const handles = await Promise.all(frequencies.map((freq, index) =>
@@ -132,6 +161,7 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
               const starts = observed.start.slice(startIndex);
               const started = starts.slice(0, frequencies.length);
               const requestSamples = observed.fetch.slice(fetchIndex);
+              const bodySamples = observed.body.slice(bodyIndex);
               const decodeSamples = observed.decode.slice(decodeIndex);
               const cachedBuffers = [...engine.decodedSampleCache.values()];
               phases.push({
@@ -144,8 +174,12 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
                 lastScheduledMs: started.length ? started[started.length - 1].time - eventTime : null,
                 networkFetches: requestSamples.length,
                 fetchSamples: requestSamples,
+                bodySamples,
                 decodes: decodeSamples.length,
                 decodeSamples,
+                peakConcurrentFetches: observed.peakFetches,
+                peakConcurrentBodies: observed.peakBodies,
+                peakConcurrentDecodes: observed.peakDecodes,
                 decodedPcmBytesEstimate: cachedBuffers.reduce(
                   (sum, buffer) => sum + buffer.length * buffer.numberOfChannels * 4, 0),
                 activeAfterStart: engine.getActiveVoices().length,
@@ -200,6 +234,15 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
           droppedNotes: rows.reduce((sum, row) => sum + (row.requested - row.started), 0),
           fetches: rows.map(row => row.networkFetches),
           decodes: rows.map(row => row.decodes),
+          p50SlowestHeaderMs: percentile(rows.map(row => Math.max(0, ...row.fetchSamples.map(x => x.ms))), 0.50),
+          p95SlowestHeaderMs: percentile(rows.map(row => Math.max(0, ...row.fetchSamples.map(x => x.ms))), 0.95),
+          p50SlowestBodyMs: percentile(rows.map(row => Math.max(0, ...row.bodySamples.map(x => x.ms))), 0.50),
+          p95SlowestBodyMs: percentile(rows.map(row => Math.max(0, ...row.bodySamples.map(x => x.ms))), 0.95),
+          p50SlowestDecodeMs: percentile(rows.map(row => Math.max(0, ...row.decodeSamples.map(x => x.ms))), 0.50),
+          p95SlowestDecodeMs: percentile(rows.map(row => Math.max(0, ...row.decodeSamples.map(x => x.ms))), 0.95),
+          peakFetchConcurrency: Math.max(...rows.map(row => row.peakConcurrentFetches)),
+          peakBodyConcurrency: Math.max(...rows.map(row => row.peakConcurrentBodies)),
+          peakDecodeConcurrency: Math.max(...rows.map(row => row.peakConcurrentDecodes)),
           decodedPcmBytes: rows.map(row => row.decodedPcmBytesEstimate),
           fetchStatus: [...new Set(rows.flatMap(row => row.fetchSamples.map(f => f.status ?? f.error)))],
         };
