@@ -94,3 +94,64 @@ export function getDepthFromBoundaries(topRatio: number, activeDepths: number, b
 
   return 0;
 }
+
+/**
+ * Shared vertical geometry for keyboard display and pointer hit testing.
+ * When invalid slots are shown, their legacy one-eighth guide cells remain
+ * visible, but active cells retain the lane's configured relative boundaries.
+ * This is a preview-consistency fix, NOT a definition of the fixed/compressed/
+ * custom layout mode semantics (microtone-piano #38).
+ */
+export interface LaneDisplaySegment {
+  depth: number;
+  heightPercent: number;
+  isInvalid: boolean;
+}
+
+export function getLaneDisplaySegments(
+  layout: LayoutPreset,
+  lane: LaneConfig | undefined,
+  isBlack: boolean,
+  showInvalidSections: boolean,
+): LaneDisplaySegment[] {
+  const activeDepths = Math.max(0, Math.min(8, lane?.activeDepths ?? 0));
+  if (!showInvalidSections && activeDepths === 0) return [];
+
+  const activeHeights = activeDepths > 0
+    ? getSegmentHeightsFromBoundaries(getLaneBoundaries(layout, lane, isBlack))
+    : [];
+
+  if (!showInvalidSections) {
+    return activeHeights.map((fraction, index) => ({
+      depth: activeDepths - 1 - index,
+      heightPercent: fraction * 100,
+      isInvalid: false,
+    }));
+  }
+
+  const inactiveCount = 8 - activeDepths;
+  return [
+    ...Array.from({length: inactiveCount}, (_, index) => ({
+      depth: 7 - index,
+      heightPercent: 100 / 8,
+      isInvalid: true,
+    })),
+    ...activeHeights.map((fraction, index) => ({
+      depth: activeDepths - 1 - index,
+      heightPercent: fraction * (activeDepths / 8) * 100,
+      isInvalid: false,
+    })),
+  ];
+}
+
+export function getDepthFromDisplaySegments(topRatio: number, segments: LaneDisplaySegment[]): number {
+  if (segments.length === 0) return 0;
+  const position = Math.max(0, Math.min(0.9999, topRatio)) * 100;
+  let cumulative = 0;
+  for (const segment of segments) {
+    cumulative += segment.heightPercent;
+    if (position < cumulative) return segment.depth;
+  }
+  // Avoid a floating-point gap at the bottom edge of the last segment.
+  return segments[segments.length - 1].depth;
+}
