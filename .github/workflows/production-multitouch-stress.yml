@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - "tests/production-multitouch.browser.mjs"
+      - "tests/production-fingering-range.browser.mjs"
       - ".github/workflows/production-multitouch-stress.yml"
 
 permissions:
@@ -14,7 +15,7 @@ permissions:
 jobs:
   multitouch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,4 +29,4 @@ jobs:
       - name: Install native Chromium automation client
         run: npm install --no-save --no-package-lock puppeteer-core@24
       - name: Emulate 4/5 simultaneous mobile touches on the compiled app
-        run: node --test tests/production-multitouch.browser.mjs
+        run: node --test --test-concurrency=1 tests/production-multitouch.browser.mjs tests/production-fingering-range.browser.mjs
