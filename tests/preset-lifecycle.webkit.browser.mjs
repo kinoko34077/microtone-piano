@@ -251,3 +251,64 @@ test('#34 Linux WebKit: real compressed BIN download and imported preset roundtr
     server.kill('SIGTERM');
   }
 });
+
+
+test('#37 Linux WebKit: imported JSON package registers both presets and survives reload', {timeout: 150000}, async () => {
+  const port = 8801;
+  const server = await startPreview(port);
+  let browser;
+  try {
+    browser = await webkit.launch({headless: true});
+    const context = await browser.newContext({viewport: {width: 390, height: 844}, acceptDownloads: true});
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto('http://127.0.0.1:' + port + '/');
+    await openMenu(page);
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', {timeout: 25000}),
+      page.getByRole('button', {name: 'JSON', exact: true}).click(),
+    ]);
+    const pkg = JSON.parse(await readFile(await download.path(), 'utf8'));
+    pkg.layoutPreset.name = '#37 WebKit レイアウト';
+    pkg.tuningPreset.name = '#37 WebKit チューニング';
+    const input = page.locator('input[type="file"][accept=".json,.bin"]');
+    await input.setInputFiles({
+      name: 'webkit-import.json', mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(pkg)),
+    });
+    await page.waitForFunction(() => document.querySelector('#layout-select')
+      ?.value?.startsWith('layout_custom_import_'));
+    const layoutId = await page.locator('#layout-select').inputValue();
+    const tuningId = await page.locator('#tuning-select').inputValue();
+    assert.ok(tuningId.startsWith('tuning_custom_import_'));
+    const durable = await waitForDurableState(page, layoutId);
+    assert.equal(durable.presetSaved, true);
+    const importedTuning = await page.evaluate(async id => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('MultiMicrotonalKeyboardDB', 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        return await new Promise((resolve, reject) => {
+          const req = db.transaction('tuningPresets', 'readonly').objectStore('tuningPresets').get(id);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      } finally { db.close(); }
+    }, tuningId);
+    assert.equal(importedTuning?.name, pkg.tuningPreset.name);
+    await page.reload();
+    await openMenu(page);
+    await page.waitForFunction(id => document.querySelector('#layout-select')?.value === id,
+      layoutId);
+    assert.equal(await page.locator('#tuning-select').inputValue(), tuningId);
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally {
+    await browser?.close();
+    server.kill('SIGTERM');
+  }
+});
