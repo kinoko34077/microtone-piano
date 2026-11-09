@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {LayoutPreset, TuningPreset, AppSettings, LaneConfig} from '../../types/keyboard';
-import {encodeAddress} from '../../core/address';
+import {encodeAddress, isPlayableAddress} from '../../core/address';
 import {calculateFrequency, getFormattedPitchLabel, resolvePitch} from '../../core/pitch';
 import {globalAudioEngine} from '../../core/audio';
 import {getDepthFromBoundaries, getLaneBoundaries, getSegmentHeightsFromBoundaries} from '../../core/laneBoundaries';
@@ -171,7 +171,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       const baseX = positiveModulo(absoluteColumn, period);
       const baseAddress = encodeAddress(baseX, isBlack, depth);
       const octOffset = Math.floor(absoluteColumn / period);
-      const pitchRef = layout.mapping[baseAddress];
+      const pitchRef = isPlayableAddress(layout, baseAddress) ? layout.mapping[baseAddress] : -1;
 
       if (pitchRef === undefined || pitchRef === -1) {
         return;
@@ -424,7 +424,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         {segments.map(({depth, heightPercent, isInvalid}) => {
           const address = encodeAddress(x, false, depth);
           const baseAddress = encodeAddress(baseX, false, depth);
-          const pitchRef = layout.mapping[baseAddress];
+          const pitchRef = isPlayableAddress(layout, baseAddress) ? layout.mapping[baseAddress] : -1;
           const isPressed = heldAddressSet.has(address);
           const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchRef, tuning);
           const totalOctaveShift = tuningOctaveShift + octOffset;
@@ -497,7 +497,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         {segments.map(({depth, heightPercent, isInvalid}) => {
           const address = encodeAddress(x, true, depth);
           const baseAddress = encodeAddress(baseX, true, depth);
-          const pitchRef = layout.mapping[baseAddress];
+          const pitchRef = isPlayableAddress(layout, baseAddress) ? layout.mapping[baseAddress] : -1;
           const isPressed = heldAddressSet.has(address);
           const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchRef, tuning);
           const totalOctaveShift = tuningOctaveShift + logicalOctaveOffset;
