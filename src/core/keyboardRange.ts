@@ -146,3 +146,17 @@ function getTwelveEdoNoteBoundedColumns(
 function periodBaseDoesNotRepresentC(tuning: TuningPreset): boolean {
   return Math.abs((tuning.baseFrequency || 261.63) - 261.63) > 0.5 || (tuning.baseStep ?? 0) !== 0;
 }
+
+/** Preserve 12-EDO's actual black-key display range when computing preload. */
+export function isBlackColumnInDisplayPitchRange(absoluteColumn: number, period: number): boolean {
+  if (period !== 7) return true;
+  const baseX = ((absoluteColumn % period) + period) % period;
+  const repeat = Math.floor(absoluteColumn / period);
+  const blackStepByWhiteColumn: Record<number, number> = {
+    0: 1, 1: 3, 3: 6, 4: 8, 5: 10,
+  };
+  const blackStep = blackStepByWhiteColumn[baseX];
+  if (blackStep === undefined) return false;
+  const midi = 60 + repeat * 12 + blackStep;
+  return midi >= MIN_DISPLAY_MIDI && midi <= MAX_DISPLAY_MIDI;
+}
