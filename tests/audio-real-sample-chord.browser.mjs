@@ -6,6 +6,7 @@ import puppeteer from 'puppeteer-core';
 // #30 diagnostic only. No application audio code or user data is modified.
 // Event -> AudioBufferSourceNode.start is NOT physical speaker onset.
 const HOST = 'http://127.0.0.1:8795';
+// Five repeats support a median and maximum; they do NOT estimate stable p95.
 const REPETITIONS = 5;
 const SCENARIOS = [
   {name: '4_distinct', frequencies: [261.625565, 329.627557, 391.995436, 440], minUnique: 4},
@@ -14,7 +15,9 @@ const SCENARIOS = [
 ];
 
 async function waitForPreview() {
-  const server = spawn('npm', ['run', 'dev', '--', '--host', '127.0.0.1',
+  // Spawn Vite directly (not via npm) so SIGTERM reliably closes the
+  // preview process even when the benchmark aborts early.
+  const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1',
     '--port', '8795', '--strictPort'], {stdio: 'ignore'});
   for (let attempt = 0; attempt < 100; attempt++) {
     if (server.exitCode !== null) throw new Error('Vite exited: ' + server.exitCode);
@@ -33,7 +36,7 @@ const percentile = (values, fraction) => {
   return Math.round(sorted[Math.ceil(sorted.length * fraction) - 1] * 100) / 100;
 };
 
-test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group)', {timeout: 240000}, async () => {
+test('#30 real M4A cold/warm chord schedule timing (5 repeats, max not p95)', {timeout: 240000}, async () => {
   const server = await waitForPreview();
   let browser;
   const records = [];
@@ -233,18 +236,18 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
         const lastStartDelays = rows.map(row => row.lastScheduledMs);
         summary[phaseName] = {
           p50LastStartMs: percentile(lastStartDelays, 0.50),
-          p95LastStartMs: percentile(lastStartDelays, 0.95),
+          maxLastStartMs: Math.max(...lastStartDelays),
           p50FirstStartMs: percentile(rows.map(row => row.firstScheduledMs), 0.50),
-          p95SpreadMs: percentile(rows.map(row => row.lastScheduledMs - row.firstScheduledMs), 0.95),
+          maxSpreadMs: Math.max(...rows.map(row => row.lastScheduledMs - row.firstScheduledMs)),
           droppedNotes: rows.reduce((sum, row) => sum + (row.requested - row.started), 0),
           fetches: rows.map(row => row.networkFetches),
           decodes: rows.map(row => row.decodes),
           p50SlowestHeaderMs: percentile(rows.map(row => Math.max(0, ...row.fetchSamples.map(x => x.ms))), 0.50),
-          p95SlowestHeaderMs: percentile(rows.map(row => Math.max(0, ...row.fetchSamples.map(x => x.ms))), 0.95),
+          maxSlowestHeaderMs: Math.max(...rows.map(row => Math.max(0, ...row.fetchSamples.map(x => x.ms)))),
           p50SlowestBodyMs: percentile(rows.map(row => Math.max(0, ...row.bodySamples.map(x => x.ms))), 0.50),
-          p95SlowestBodyMs: percentile(rows.map(row => Math.max(0, ...row.bodySamples.map(x => x.ms))), 0.95),
+          maxSlowestBodyMs: Math.max(...rows.map(row => Math.max(0, ...row.bodySamples.map(x => x.ms)))),
           p50SlowestDecodeMs: percentile(rows.map(row => Math.max(0, ...row.decodeSamples.map(x => x.ms))), 0.50),
-          p95SlowestDecodeMs: percentile(rows.map(row => Math.max(0, ...row.decodeSamples.map(x => x.ms))), 0.95),
+          maxSlowestDecodeMs: Math.max(...rows.map(row => Math.max(0, ...row.decodeSamples.map(x => x.ms)))),
           peakFetchConcurrency: Math.max(...rows.map(row => row.peakConcurrentFetches)),
           peakBodyConcurrency: Math.max(...rows.map(row => row.peakConcurrentBodies)),
           peakDecodeConcurrency: Math.max(...rows.map(row => row.peakConcurrentDecodes)),
