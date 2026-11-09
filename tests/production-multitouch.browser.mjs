@@ -101,6 +101,11 @@ async function runRepeated(page, cdp, name, points, repetitions, holdMs, release
     }
     const delays = details.filter(v => v.starts === fingerCount && v.downs === fingerCount)
       .map(v => v.eventToLastStart);
+    const sceneStarts = p.starts.filter(v => v.phase?.startsWith(name + '-'));
+    const firstDownAt = Math.min(...p.pointer.filter(v => v.phase === name + '-0' &&
+      v.event === 'pointerdown').map(v => v.at));
+    const lastUpAt = Math.max(...p.pointer.filter(v => v.phase === name + '-' + (repetitions - 1) &&
+      v.event === 'pointerup').map(v => v.at));
     const sorted = delays.slice().sort((a,b) => a-b);
     const percentile = q => sorted.length ?
       Math.round(sorted[Math.ceil(sorted.length*q)-1]*100)/100 : null;
@@ -111,10 +116,11 @@ async function runRepeated(page, cdp, name, points, repetitions, holdMs, release
       missedContacts: details.filter(v=>v.downs!==fingerCount).length,
       droppedSoundBursts: details.filter(v=>v.starts!==fingerCount).length,
       lateStarts: details.reduce((s,v)=>s+v.lateStarts,0),
+      startsWithSuspendedAudioContext: sceneStarts.filter(v=>v.contextState !== 'running').length,
       lastSourceDelayP50Ms: percentile(.50),
       lastSourceDelayP95Ms: percentile(.95),
       lastSourceDelayMaxMs: sorted.length ? Math.max(...sorted) : null,
-      longTasksOver50Ms: p.longTasks.filter(v=>v.at>=p.startAt).length,
+      longTasksOver50Ms: p.longTasks.filter(v=>v.at>=firstDownAt && v.at<=lastUpAt).length,
       decodedSamples: p.decode.length,
       fetchedSamples: p.fetch.length,
       diagnostics: details.filter(v=>v.downs!==fingerCount || v.ups!==fingerCount ||
@@ -130,6 +136,8 @@ async function runRepeated(page, cdp, name, points, repetitions, holdMs, release
     'one real AudioBufferSourceNode per warmed physical contact was expected');
   assert.equal(result.lateStarts, 0,
     'sample audio must not begin after the associated multi-touch fingers are lifted');
+  assert.equal(result.startsWithSuspendedAudioContext, 0,
+    'source.start calls on a suspended context are not proof of real audio playback');
   return result;
 }
 
@@ -168,7 +176,7 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
       AudioBufferSourceNode.prototype.start = function (...args) {
         p.starts.push({phase: p.phase, at: performance.now(),
           when: args[0] ?? 0, currentTime: this.context.currentTime,
-          hasBuffer: Boolean(this.buffer)});
+          contextState: this.context.state, hasBuffer: Boolean(this.buffer)});
         return originalStart.apply(this, args);
       };
       const originalStop = AudioBufferSourceNode.prototype.stop;
@@ -296,10 +304,9 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
         decodedSamples: p.decode.length, fetchedSamples: p.fetch.length,
         longTaskCount: p.longTasks.length,
         longestLongTaskMs: p.longTasks.length ? Math.max(...p.longTasks.map(x => x.ms)) : 0,
-        firstCold: {
-          downs: p.pointer.filter(x=>x.phase==='first-cold-5'&&x.event==='pointerdown').length,
-          starts: p.starts.filter(x=>x.phase==='first-cold-5').length,
-        },
+        // Mobile emulation can reinitialize the document on a wide-viewport
+        // switch. Initial gesture evidence is preserved separately in Node.
+        recorderScope: 'last wide viewport document only',
       };
     });
     const aggregate = {
@@ -311,6 +318,7 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
       expectedTouches: groups.reduce((sum, v) => sum + v.repetitions * v.fingerCount, 0),
       totalMissingSoundBursts: groups.reduce((sum, v) => sum + v.droppedSoundBursts, 0),
       totalLateStarts: groups.reduce((sum, v) => sum + v.lateStarts, 0),
+      totalSuspendedStarts: groups.reduce((sum, v) => sum + v.startsWithSuspendedAudioContext, 0),
       initialRapid: firstRapid,
       initialHeld: firstHeld,
       finalViewportRecorder: final,
@@ -324,6 +332,7 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
     assert.equal(aggregate.totalSourcesStarted, aggregate.expectedTouches);
     assert.equal(aggregate.totalMissingSoundBursts, 0);
     assert.equal(aggregate.totalLateStarts, 0);
+    assert.equal(aggregate.totalSuspendedStarts, 0);
   } finally {
     await browser?.close();
     server.kill('SIGTERM');
