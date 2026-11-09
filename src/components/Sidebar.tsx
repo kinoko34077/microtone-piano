@@ -16,6 +16,7 @@ import {
 import {LayoutPreset, TuningPreset, AppSettings, OutOfRangeNotice} from '../types/keyboard';
 import {storageService} from '../core/storage';
 import {validatePresetImport} from '../core/presetValidation';
+import type {PresetImportResult} from '../core/presetValidation';
 import {globalAudioEngine} from '../core/audio';
 
 interface SidebarProps {
@@ -29,6 +30,7 @@ interface SidebarProps {
   currentTuning: TuningPreset;
   allTunings: TuningPreset[];
   onSelectTuning: (tuning: TuningPreset) => void;
+  onImportPreset: (admission: Extract<PresetImportResult, {ok: true}>) => Promise<void>;
   onDuplicateTuning: () => void;
   onSaveTuning: () => void;
   settings: AppSettings;
@@ -53,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentTuning,
   allTunings,
   onSelectTuning,
+  onImportPreset,
   onDuplicateTuning,
   onSaveTuning,
   settings,
@@ -147,17 +150,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return;
       }
 
-      if (admission.kind === 'package') {
-        // Validate the complete package before either callback mutates active state.
-        onSelectLayout(admission.layout);
-        if (admission.tuning) {
-          onSelectTuning(admission.tuning);
-        }
-      } else if (admission.kind === 'layout') {
-        onSelectLayout(admission.layout);
-      } else {
-        onSelectTuning(admission.tuning);
-      }
+      // Decode/validate before changing anything; the App owns atomic admission
+      // and changes selected presets only after IndexedDB commits successfully.
+      await onImportPreset(admission);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : '不明なエラー';
       window.alert(`読み込みに失敗しました: ${message}`);
