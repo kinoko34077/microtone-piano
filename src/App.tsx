@@ -12,6 +12,7 @@ import type {PresetImportResult} from './core/presetValidation';
 import {globalAudioEngine, PianoSampleStatus} from './core/audio';
 import {calculateFrequency, resolvePitch} from './core/pitch';
 import {keyToAddress} from './core/pcKeyboard';
+import {isPlayableAddress} from './core/address';
 import {PcKeyPressRegistry} from './core/pcKeyPressRegistry';
 import {DebouncedSettingsSaver} from './core/debouncedSettingsSaver';
 import {getKeyboardColumnRange} from './core/keyboardRange';
@@ -598,6 +599,7 @@ export default function App() {
       event.preventDefault();
       const activeLayout = currentLayoutRef.current;
       const activeTuning = currentTuningRef.current;
+      if (!isPlayableAddress(activeLayout, address)) return;
       const pitchRef = activeLayout.mapping[address];
       if (pitchRef === undefined || pitchRef === -1) {
         return;
