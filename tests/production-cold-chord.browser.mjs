@@ -103,6 +103,14 @@ async function freshPage(browser, {gateSamples, throttleCpu=4, width=412}={}) {
   // Gated sample requests must NOT deadlock navigation.
   await page.goto(URL, {waitUntil:'domcontentloaded'});
   await page.waitForSelector('[data-keyboard-viewport="lower"] [data-key-color="white"]');
+  await page.waitForFunction(() => {
+    const viewport=document.querySelector('[data-keyboard-viewport="lower"]');
+    return viewport && viewport.clientWidth>0 && viewport.scrollWidth>viewport.clientWidth;
+  });
+  // The app applies its saved/initial focus via a mount effect. Let that
+  // deliberate initialization settle BEFORE positioning the test register.
+  // M4A fetches remain intercepted, so this cannot prewarm the cold chord.
+  await sleep(350);
   const cdp=await page.createCDPSession();
   await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});
   if(throttleCpu>1) await cdp.send('Emulation.setCPUThrottlingRate',{rate:throttleCpu});
@@ -110,22 +118,26 @@ async function freshPage(browser, {gateSamples, throttleCpu=4, width=412}={}) {
 }
 
 async function scrollTo(page, ratio) {
-  await page.evaluate(frac=>{
-    const el=document.querySelector('[data-keyboard-viewport="lower"]');
-    if(!el) throw Error('missing real keyboard');
-    el.scrollLeft=(el.scrollWidth-el.clientWidth)*frac;
-    el.dispatchEvent(new Event('scroll',{bubbles:true}));
-  },ratio);
-  await sleep(180);
-  const position=await page.evaluate(()=>{
-    const el=document.querySelector('[data-keyboard-viewport="lower"]');
-    const whites=[...el.querySelectorAll('[data-key-color="white"]')];
-    return {scrollLeft:el.scrollLeft,firstColumn:Number(whites[0]?.dataset.keyColumn),
-      fraction:el.scrollLeft/Math.max(1,el.scrollWidth-el.clientWidth)};
-  });
-  assert.ok(Math.abs(position.fraction-ratio)<0.055,
-    'scroll did not reach requested register '+JSON.stringify(position));
-  return position;
+  // A slow CI machine may still be applying its initial-focus mount effect.
+  // Re-apply the requested scroll until the actual rendered register is stable.
+  let last=null;
+  for (let attempt=0;attempt<6;attempt++) {
+    await page.evaluate(frac=>{
+      const el=document.querySelector('[data-keyboard-viewport="lower"]');
+      if(!el) throw Error('missing real keyboard');
+      el.scrollLeft=(el.scrollWidth-el.clientWidth)*frac;
+      el.dispatchEvent(new Event('scroll',{bubbles:true}));
+    },ratio);
+    await sleep(210);
+    last=await page.evaluate(()=>{
+      const el=document.querySelector('[data-keyboard-viewport="lower"]');
+      const whites=[...el.querySelectorAll('[data-key-color="white"]')];
+      return {scrollLeft:el.scrollLeft,firstColumn:Number(whites[0]?.dataset.keyColumn),
+        fraction:el.scrollLeft/Math.max(1,el.scrollWidth-el.clientWidth)};
+    });
+    if(Math.abs(last.fraction-ratio)<0.055) return last;
+  }
+  assert.fail('scroll did not reach requested register after mount settled '+JSON.stringify({ratio,last}));
 }
 
 async function playablePoints(page, fingerCount=5, spread=true) {
