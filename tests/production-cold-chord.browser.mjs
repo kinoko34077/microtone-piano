@@ -339,6 +339,8 @@ async function naturalCacheChurn(browser) {
       if(index===0)firstIds=obs.uniqueDecodedBuffers;
       assert.equal(obs.downs,5);
       assert.equal(obs.ups,5);
+      assert.equal(obs.starts,5,
+        'every real chord must still begin while moving across the PCM cache working set');
       assert.equal(obs.lateStarts,0);
       assert.equal(obs.suspendedStarts,0);
     }
