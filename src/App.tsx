@@ -319,6 +319,7 @@ export default function App() {
 
   useEffect(() => {
     setPianoSampleOverrides(currentTuning, settings.pianoSampleOverrides);
+    globalAudioEngine.refreshVisiblePianoSampleMappings();
   }, [currentTuning, settings.pianoSampleOverrides]);
 
   useEffect(() => {
