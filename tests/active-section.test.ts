@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import {encodeAddress, isPlayableAddress} from '../src/core/address';
 import {STANDARD_LAYOUT_256TEST} from '../src/core/presets';
+import {getLaneDisplaySegments, getDepthFromDisplaySegments} from '../src/core/laneBoundaries';
 
 test('#38 inactive lane depth cannot play even when its old mapping is retained', () => {
   const layout = {
@@ -60,4 +61,55 @@ test('#38 glissando checks playability before touching the pressed visual set', 
   assert.ok(guard >= 0 && address > guard && highlight > address,
     'An inactive/unassigned hit must be rejected before rendering a highlight');
   assert.match(move, /resolvePitch\(pitchRef, tuning\)\.pitchDef !== null/);
+});
+
+test('#38 nonuniform active boundaries survive the invalid-slot preview without hit-test drift', () => {
+  const layout = {...STANDARD_LAYOUT_256TEST};
+  const lane = {activeDepths: 2, customBoundaries: [0, 0.8, 1]};
+  const preview = getLaneDisplaySegments(layout, lane, false, true);
+  assert.equal(preview.length, 8);
+  assert.deepEqual(preview.map(segment => segment.depth), [7, 6, 5, 4, 3, 2, 1, 0]);
+  assert.deepEqual(preview.map(segment => segment.isInvalid), [true, true, true, true, true, true, false, false]);
+  // Six fixed guides (75%); the two active sections share the remaining 25%
+  // according to the user's 80/20 boundary, not an obsolete 50/50 split.
+  assert.ok(Math.abs(preview[6].heightPercent - 20) < 1e-9);
+  assert.ok(Math.abs(preview[7].heightPercent - 5) < 1e-9);
+  assert.ok(Math.abs(preview.reduce((sum, segment) => sum + segment.heightPercent, 0) - 100) < 1e-9);
+  assert.equal(getDepthFromDisplaySegments(0.60, preview), 3, 'inactive preview retains its address');
+  assert.equal(getDepthFromDisplaySegments(0.80, preview), 1, 'active depth one occupies 75..95%');
+  assert.equal(getDepthFromDisplaySegments(0.98, preview), 0, 'active depth zero occupies 95..100%');
+  assert.deepEqual(
+    getLaneDisplaySegments(layout, lane, false, false).map(segment => segment.heightPercent),
+    [80, 19.999999999999996],
+    'hidden-invalid mode preserves the existing full-height active key',
+  );
+});
+
+test('#38 0/1/8-depth white and black preview use the same drawable and hittable intervals', () => {
+  const layout = {...STANDARD_LAYOUT_256TEST};
+  for (const isBlack of [false, true]) {
+    for (const count of [0, 1, 2, 8]) {
+      const lane = {activeDepths: count};
+      const preview = getLaneDisplaySegments(layout, lane, isBlack, true);
+      assert.equal(preview.length, 8);
+      assert.equal(preview.filter(segment => segment.isInvalid).length, 8 - count);
+      assert.ok(Math.abs(preview.reduce((sum, segment) => sum + segment.heightPercent, 0) - 100) < 1e-8);
+      let position = 0;
+      for (const segment of preview) {
+        if (segment.heightPercent > 0.001) {
+          const centerRatio = (position + segment.heightPercent / 2) / 100;
+          assert.equal(getDepthFromDisplaySegments(centerRatio, preview), segment.depth);
+        }
+        position += segment.heightPercent;
+      }
+    }
+  }
+});
+
+test('#38 keyboard rendering and hit test both call the canonical preview helper', () => {
+  const source = readFileSync(new URL('../src/components/Keyboard/InteractiveKeyboard.tsx', import.meta.url), 'utf8');
+  const calls = source.match(/getLaneDisplaySegments\(/g) ?? [];
+  assert.ok(calls.length >= 4, 'both keyboard colors and both hit-test paths use canonical geometry');
+  assert.ok(source.includes('getDepthFromDisplaySegments('));
+  assert.ok(!source.includes('calculateDepthFromRatio('));
 });
