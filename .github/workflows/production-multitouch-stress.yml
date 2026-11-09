@@ -1,0 +1,31 @@
+name: Production mobile multi-touch stress (opt-in)
+
+# Heavy browser performance evidence is never a required generic audio CI gate.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tests/production-multitouch.browser.mjs"
+      - ".github/workflows/production-multitouch-stress.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  multitouch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install project dependencies
+        run: npm ci
+      - name: Build the actual production UI
+        run: npm run build
+      - name: Install native Chromium automation client
+        run: npm install --no-save --no-package-lock puppeteer-core@24
+      - name: Emulate 4/5 simultaneous mobile touches on the compiled app
+        run: node --test tests/production-multitouch.browser.mjs
