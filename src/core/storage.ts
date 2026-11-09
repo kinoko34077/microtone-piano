@@ -172,6 +172,47 @@ export class StorageService {
     });
   }
 
+  /**
+   * Admit a validated import as new custom presets. The two records share one
+   * transaction so a failed package import cannot retain only one half.
+   * add() rather than put() prevents any collision from replacing user data.
+   */
+  public async saveImportedPresetCopies(
+    layout?: LayoutPreset,
+    tuning?: TuningPreset,
+  ): Promise<void> {
+    if (!layout && !tuning) {
+      throw new Error('読み込むプリセットがありません。');
+    }
+    if (layout) {
+      const result = validateLayoutPresetData(layout);
+      if ('error' in result) throw new Error(`配置プリセットが不正です: ${result.error}`);
+    }
+    if (tuning) {
+      const result = validateTuningPresetData(tuning);
+      if ('error' in result) throw new Error(`音高プリセットが不正です: ${result.error}`);
+    }
+
+    const db = await this.initDB();
+    const stores = [
+      ...(layout ? [STORE_LAYOUTS] : []),
+      ...(tuning ? [STORE_TUNINGS] : []),
+    ];
+    const tx = db.transaction(stores, 'readwrite');
+    return new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('プリセットの取り込みに失敗しました。'));
+      tx.onabort = () => reject(tx.error ?? new Error('プリセットの取り込みを中止しました。'));
+      try {
+        if (layout) tx.objectStore(STORE_LAYOUTS).add(layout);
+        if (tuning) tx.objectStore(STORE_TUNINGS).add(tuning);
+      } catch (error) {
+        try { tx.abort(); } catch { /* already aborted */ }
+        reject(error);
+      }
+    });
+  }
+
   public async deleteLayoutPreset(id: string): Promise<void> {
     const db = await this.initDB();
     const tx = db.transaction(STORE_LAYOUTS, 'readwrite');

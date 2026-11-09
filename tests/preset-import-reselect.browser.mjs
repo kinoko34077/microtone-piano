@@ -159,3 +159,140 @@ test("#34 real Chromium downloads gzip BIN, reimports it and accepts legacy BIN"
     await rm(dir,{recursive:true,force:true});
   }
 });
+
+
+test("#37 Chromium import is durable, collision-safe, and atomic on write rejection",async()=>{
+  const server=spawn("npm",["run","preview","--","--host","127.0.0.1","--port","8799","--strictPort"],{stdio:"ignore"});
+  let browser;
+  const dir=await mkdtemp(join(tmpdir(),"preset-import-37-"));
+  try{
+    let ready=false;
+    for(let i=0;i<70;i++){
+      try{if((await fetch("http://127.0.0.1:8799/")).ok){ready=true;break;}}catch{}
+      await new Promise(resolve=>setTimeout(resolve,150));
+    }
+    assert.ok(ready,"Vite preview did not start");
+    browser=await puppeteer.launch({executablePath:process.env.CHROME_BIN||"/usr/bin/google-chrome",
+      headless:true,args:["--no-sandbox","--disable-dev-shm-usage"]});
+    const page=await browser.newPage();
+    const client=await page.createCDPSession();
+    await client.send("Page.setDownloadBehavior",{behavior:"allow",downloadPath:dir});
+    const dialogs=[];const errors=[];
+    page.on("pageerror",error=>errors.push(error.message));
+    page.on("dialog",async dialog=>{dialogs.push(dialog.message());await dialog.dismiss();});
+    await page.goto("http://127.0.0.1:8799/",{waitUntil:"domcontentloaded"});
+    await page.click('button[aria-label="メニューを開く"]');
+
+    const jsonButton=(await page.$$('aside[role="dialog"] button'));
+    let exported=false;
+    for(const button of jsonButton){
+      if((await button.evaluate(el=>el.textContent?.trim()))==="JSON"){
+        await button.click();exported=true;break;
+      }
+    }
+    assert.ok(exported,"JSON export button missing");
+    let exportedPath;
+    for(let attempt=0;attempt<100;attempt++){
+      exportedPath=(await readdir(dir)).find(name=>name.endsWith(".json"));
+      if(exportedPath)break;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    assert.ok(exportedPath,"Cannot obtain baseline package");
+    const pkg=JSON.parse(await readFile(join(dir,exportedPath),"utf8"));
+    pkg.layoutPreset.name="#37 復元検証用配置";
+    pkg.tuningPreset.name="#37 復元検証用音高";
+    const fixture=join(dir,"import-package.json");
+    await writeFile(fixture,JSON.stringify(pkg),"utf8");
+    const input=await page.$('input[type="file"][accept=".json,.bin"]');
+    assert.ok(input);
+
+    const state=async()=>page.evaluate(async()=>{
+      const layoutId=document.querySelector("#layout-select")?.value;
+      const tuningId=document.querySelector("#tuning-select")?.value;
+      const db=await new Promise((resolve,reject)=>{
+        const req=indexedDB.open("MultiMicrotonalKeyboardDB",1);
+        req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+      });
+      try{
+        const tx=db.transaction(["layoutPresets","tuningPresets","appSettings"],"readonly");
+        const record=(store,id)=>new Promise((resolve,reject)=>{
+          const req=tx.objectStore(store).get(id);
+          req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+        });
+        const all=(store)=>new Promise((resolve,reject)=>{
+          const req=tx.objectStore(store).getAll();
+          req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+        });
+        const [layout,tuning,settings,allLayouts,allTunings]=await Promise.all([
+          record("layoutPresets",layoutId),record("tuningPresets",tuningId),
+          record("appSettings","current_settings"),all("layoutPresets"),all("tuningPresets")
+        ]);
+        return {layoutId,tuningId,layout,tuning,
+          settings:settings?.value,layoutCount:allLayouts.length,tuningCount:allTunings.length};
+      }finally{db.close();}
+    });
+    const waitSaved=async()=>{
+      let last;
+      for(let attempt=0;attempt<110;attempt++){
+        last=await state();
+        if(last.layout?.name===pkg.layoutPreset.name&&last.tuning?.name===pkg.tuningPreset.name&&
+          last.settings?.defaultLayoutPresetId===last.layoutId&&last.settings?.defaultPitchPresetId===last.tuningId)
+          return last;
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      throw Error("Imported package not durable: "+JSON.stringify(last));
+    };
+
+    await input.uploadFile(fixture);
+    const first=await waitSaved();
+    assert.ok(first.layoutId.startsWith("layout_custom_import_"));
+    assert.ok(first.tuningId.startsWith("tuning_custom_import_"));
+    assert.equal(first.layout.defaultTuningId,first.tuningId);
+    assert.equal(first.layout.isStandard,false);
+    assert.equal(first.tuning.isStandard,false);
+    assert.deepEqual(first.layout.mapping,pkg.layoutPreset.mapping,"all 256 mappings must be lossless");
+    await page.reload({waitUntil:"domcontentloaded"});
+    await page.click('button[aria-label="メニューを開く"]');
+    const restored=await waitSaved();
+    assert.equal(restored.layoutId,first.layoutId);
+    assert.equal(restored.tuningId,first.tuningId);
+
+    await page.evaluate(()=>{
+      const original=IDBObjectStore.prototype.add;
+      window.__restoreImportAdd=()=>{IDBObjectStore.prototype.add=original;};
+      IDBObjectStore.prototype.add=function(...args){
+        if(this.name==="tuningPresets")
+          throw new DOMException("isolated quota test","QuotaExceededError");
+        return original.apply(this,args);
+      };
+    });
+    const inputAfter=await page.$('input[type="file"][accept=".json,.bin"]');
+    await inputAfter.uploadFile(fixture);
+    for(let i=0;i<100&&!dialogs.length;i++)await new Promise(resolve=>setTimeout(resolve,50));
+    assert.ok(dialogs.length>0,"A rejected package must show an error");
+    const rejected=await state();
+    assert.equal(rejected.layoutId,first.layoutId,"Rejected import must not switch current layout");
+    assert.equal(rejected.tuningId,first.tuningId,"Rejected import must not switch current tuning");
+    assert.equal(rejected.layoutCount,first.layoutCount,"Layout half must roll back");
+    assert.equal(rejected.tuningCount,first.tuningCount,"Tuning half must roll back");
+    await page.evaluate(()=>window.__restoreImportAdd());
+
+    await inputAfter.uploadFile(fixture);
+    let second;
+    for(let i=0;i<90;i++){
+      second=await state();
+      if(second.layoutCount===first.layoutCount+1&&second.tuningCount===first.tuningCount+1&&
+        second.layoutId!==first.layoutId&&second.tuningId!==first.tuningId)break;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    assert.ok(second.layoutId!==first.layoutId,"Repeated import creates a new ID rather than overwrite");
+    assert.equal(second.layoutCount,first.layoutCount+1);
+    assert.equal(second.tuningCount,first.tuningCount+1);
+    assert.equal(second.layout.defaultTuningId,second.tuningId);
+    assert.deepEqual(errors,[]);
+  }finally{
+    if(browser)await browser.close();
+    server.kill("SIGTERM");
+    await rm(dir,{recursive:true,force:true});
+  }
+});

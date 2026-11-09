@@ -8,6 +8,7 @@ import {
   STANDARD_TUNING_12EDO,
 } from './core/presets';
 import {storageService, DEFAULT_APP_SETTINGS} from './core/storage';
+import type {PresetImportResult} from './core/presetValidation';
 import {globalAudioEngine, PianoSampleStatus} from './core/audio';
 import {calculateFrequency, resolvePitch} from './core/pitch';
 import {keyToAddress} from './core/pcKeyboard';
@@ -448,6 +449,52 @@ export default function App() {
     persistPreset('tuning', currentTuning);
   }, [currentTuning, handleDuplicateTuning, persistPreset]);
 
+  const handleImportPreset = useCallback(async (admission: Extract<PresetImportResult, {ok: true}>) => {
+    if (!settingsReady || presetReadBlockedRef.current) {
+      throw new Error('保存済みプリセットの読み込みが完了していません。復旧後にもう一度読み込んでください。');
+    }
+
+    // Every file import creates new custom identities. Even a package exported
+    // from a built-in preset must never replace existing local/user records.
+    const importId = `${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    const sourceTuning = 'tuning' in admission ? admission.tuning : undefined;
+    const sourceLayout = 'layout' in admission ? admission.layout : undefined;
+    const importedTuning: TuningPreset | undefined = sourceTuning
+      ? {...sourceTuning, id: `tuning_custom_import_${importId}`, isStandard: false}
+      : undefined;
+    const importedLayout: LayoutPreset | undefined = sourceLayout
+      ? {
+          ...sourceLayout,
+          id: `layout_custom_import_${importId}`,
+          isStandard: false,
+          // Use the companion imported tuning, or the currently validated one.
+          defaultTuningId: importedTuning?.id ??
+            (confirmedTuningIds.current.has(currentTuning.id) ? currentTuning.id : undefined),
+        }
+      : undefined;
+
+    // The UI must not claim a successful import until both records are durable.
+    await storageService.saveImportedPresetCopies(importedLayout, importedTuning);
+    handleAllNotesOff();
+
+    if (importedLayout) {
+      confirmedLayoutIds.current.add(importedLayout.id);
+      setAllLayouts((previous) => [...previous, importedLayout]);
+      setCurrentLayout(importedLayout);
+    }
+    if (importedTuning) {
+      confirmedTuningIds.current.add(importedTuning.id);
+      setAllTunings((previous) => [...previous, importedTuning]);
+      setCurrentTuning(importedTuning);
+    }
+    setSettings((previous) => normalizeSettings({
+      ...previous,
+      ...(importedLayout ? {defaultLayoutPresetId: importedLayout.id} : {}),
+      ...(importedTuning ? {defaultPitchPresetId: importedTuning.id} : {}),
+    }));
+    setPresetReceiptRevision((previous) => previous + 1);
+  }, [currentTuning.id, handleAllNotesOff, settingsReady]);
+
   const handleSelectLayout = useCallback(
     (layout: LayoutPreset) => {
       handleAllNotesOff();
@@ -697,6 +744,7 @@ export default function App() {
         currentTuning={currentTuning}
         allTunings={allTunings}
         onSelectTuning={handleSelectTuning}
+        onImportPreset={handleImportPreset}
         onDuplicateTuning={handleDuplicateTuning}
         onSaveTuning={handleSaveTuning}
         settings={settings}
