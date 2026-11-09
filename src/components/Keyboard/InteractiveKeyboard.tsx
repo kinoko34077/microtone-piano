@@ -584,6 +584,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     <div className="flex h-full w-full flex-col overflow-hidden bg-[#0d1117]">
       <div
         ref={containerRef}
+        data-keyboard-viewport={preloadGroupId}
         className="relative flex flex-1 cursor-pointer select-none overflow-x-auto overflow-y-hidden p-0 touch-none"
         onScroll={handleScroll}
         onPointerDown={handlePointerDown}
