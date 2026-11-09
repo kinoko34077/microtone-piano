@@ -207,22 +207,52 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
     const five = await selectPoints(page, 'lower', 5);
     console.log('PRODUCTION_MULTITOUCH_TARGETS', JSON.stringify({five, viewport: '412x915@2'}));
 
-    // Real first-use gesture, with real samples and user-gesture AudioContext start.
-    await page.evaluate(() => {window.__fingerBench.phase = 'first-cold-5';});
+    // Test an extremely brief very-first gesture as well as a held chord.
+    // A still-decoding note may be canceled, but MUST NOT start after release.
+    await page.evaluate(() => {window.__fingerBench.phase = 'first-rapid-5';});
+    await gesture(cdp, five, 30, 150);
+    await page.evaluate(() => {window.__fingerBench.phase = null;});
+    const firstRapid = await page.evaluate(() => {
+      const p = window.__fingerBench;
+      const downs = p.pointer.filter(v => v.phase === 'first-rapid-5' && v.event === 'pointerdown');
+      const ups = p.pointer.filter(v => v.phase === 'first-rapid-5' && v.event === 'pointerup');
+      const starts = p.starts.filter(v => v.phase === 'first-rapid-5');
+      const releasedAt = Math.max(...ups.map(v => v.at));
+      return {downs: downs.length, ups: ups.length, starts: starts.length,
+        lateStarts: starts.filter(v => v.at > releasedAt).length};
+    });
+    console.log('PRODUCTION_FIRST_RAPID_TOUCH', JSON.stringify(firstRapid));
+    assert.equal(firstRapid.downs, 5);
+    assert.equal(firstRapid.ups, 5);
+    assert.equal(firstRapid.lateStarts, 0);
+    // First sustained chord; do not assume the visible preload has completed.
+    await page.evaluate(() => {window.__fingerBench.phase = 'first-held-5';});
     await gesture(cdp, five, 260, 220);
     await page.evaluate(() => {window.__fingerBench.phase = null;});
+    const firstHeld = await page.evaluate(() => {
+      const p = window.__fingerBench;
+      return {
+        downs: p.pointer.filter(v => v.phase === 'first-held-5' && v.event === 'pointerdown').length,
+        starts: p.starts.filter(v => v.phase === 'first-held-5').length,
+        decodedSamples: p.decode.length, fetchedSamples: p.fetch.length,
+      };
+    });
+    console.log('PRODUCTION_FIRST_HELD_TOUCH', JSON.stringify(firstHeld));
     await pause(1500); // allow visible prewarm to catch up; no engine mocks
     await page.evaluate(() => {window.__fingerBench.phase = 'warmup';});
     await gesture(cdp, five, 240, 200);
     await page.evaluate(() => {window.__fingerBench.phase = null;});
     await pause(450);
 
-    await runRepeated(page, cdp, 'four-regular-mobile',
-      five.slice(0, 4), 24, 80, 45);
-    await runRepeated(page, cdp, 'five-regular-mobile',
-      five, 24, 80, 45);
-    await runRepeated(page, cdp, 'five-fast-mobile',
-      five, 28, 30, 35);
+    // Store scenario results in Node: changing mobile emulation on resize
+    // may reload the page and legitimately reset the per-document recorder.
+    const groups = [];
+    groups.push(await runRepeated(page, cdp, 'four-regular-mobile',
+      five.slice(0, 4), 24, 80, 45));
+    groups.push(await runRepeated(page, cdp, 'five-regular-mobile',
+      five, 24, 80, 45));
+    groups.push(await runRepeated(page, cdp, 'five-fast-mobile',
+      five, 28, 30, 35));
 
     // Two independently scrolled rows: e.g. two fingers upper, three lower.
     await page.click('button[aria-label="メニューを開く"]');
@@ -242,7 +272,7 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
     await gesture(cdp, twoRows, 260, 220);
     await page.evaluate(() => {window.__fingerBench.phase = null;});
     await pause(350);
-    await runRepeated(page, cdp, 'five-two-row-mobile', twoRows, 20, 80, 45);
+    groups.push(await runRepeated(page, cdp, 'five-two-row-mobile', twoRows, 20, 80, 45));
 
     // Wide touch display exercises larger visible predecode set.
     await page.setViewport({
@@ -255,7 +285,7 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
     await gesture(cdp, wide, 240, 250);
     await page.evaluate(() => {window.__fingerBench.phase = null;});
     await pause(300);
-    await runRepeated(page, cdp, 'five-wide-touch-display', wide, 20, 80, 45);
+    groups.push(await runRepeated(page, cdp, 'five-wide-touch-display', wide, 20, 80, 45));
 
     const final = await page.evaluate(() => {
       const p = window.__fingerBench;
@@ -272,10 +302,28 @@ test('#30 production-built mobile multi-finger tapping: 4/5-finger fast repetiti
         },
       };
     });
-    console.log('PRODUCTION_MULTITOUCH_TOTAL', JSON.stringify(final));
+    const aggregate = {
+      summary: 'five independently verified realistic multi-contact workloads',
+      scenarios: groups.map(v => v.name),
+      totalFingerDowns: groups.reduce((sum, v) => sum + v.pointerDowns, 0),
+      totalFingerUps: groups.reduce((sum, v) => sum + v.pointerUps, 0),
+      totalSourcesStarted: groups.reduce((sum, v) => sum + v.starts, 0),
+      expectedTouches: groups.reduce((sum, v) => sum + v.repetitions * v.fingerCount, 0),
+      totalMissingSoundBursts: groups.reduce((sum, v) => sum + v.droppedSoundBursts, 0),
+      totalLateStarts: groups.reduce((sum, v) => sum + v.lateStarts, 0),
+      initialRapid: firstRapid,
+      initialHeld: firstHeld,
+      finalViewportRecorder: final,
+    };
+    console.log('PRODUCTION_MULTITOUCH_AGGREGATE', JSON.stringify(aggregate));
     assert.deepEqual(errors, [], 'unexpected app runtime JavaScript error');
     assert.ok(final.decodedSamples >= 1, 'must have used actual M4A decoder');
-    assert.ok(final.starts > 200, 'not enough actual source nodes to count as a stress run');
+    assert.ok(aggregate.expectedTouches >= 500, 'not enough contacts for stress sample');
+    assert.equal(aggregate.totalFingerDowns, aggregate.expectedTouches);
+    assert.equal(aggregate.totalFingerUps, aggregate.expectedTouches);
+    assert.equal(aggregate.totalSourcesStarted, aggregate.expectedTouches);
+    assert.equal(aggregate.totalMissingSoundBursts, 0);
+    assert.equal(aggregate.totalLateStarts, 0);
   } finally {
     await browser?.close();
     server.kill('SIGTERM');
