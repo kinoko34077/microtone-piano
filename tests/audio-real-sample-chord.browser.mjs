@@ -140,6 +140,10 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
 
             const phases = [];
             for (const phaseName of ['cold', 'warm']) {
+              // Attribute concurrency to this phase, not a previous cold pass.
+              observed.peakFetches = 0;
+              observed.peakBodies = 0;
+              observed.peakDecodes = 0;
               const startIndex = observed.start.length;
               const fetchIndex = observed.fetch.length;
               const bodyIndex = observed.body.length;
@@ -220,7 +224,8 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
 
     for (const scenario of SCENARIOS) {
       const entries = records.filter(row => row.name === scenario.name);
-      const summary = {mainEquivalentCode: true, scenario: scenario.name, repeats: entries.length,
+      const summary = {measurementPath: 'Vite development module / same source, not production bundle',
+        scenario: scenario.name, repeats: entries.length,
         noteCount: scenario.frequencies.length, sampleIds: entries[0].sampleIds,
         cold: {}, warm: {}};
       for (const phaseName of ['cold', 'warm']) {
