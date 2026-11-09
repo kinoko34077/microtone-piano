@@ -59,12 +59,18 @@ test('sample attack and decay use playback readiness time', async () => {
   assert.match(on, /const decayEndTime = playbackStart \+ attackTime/);
 });
 
-test('background preloading yields to played chords and prefers central register', async () => {
+test('visible samples prewarm before slow offscreen fetching and yield to live notes', async () => {
   const audio = await read('src/core/audio.ts');
-  const preload = section(audio, 'private async runPianoSamplePreload(', 'private async loadPianoSampleBuffer(');
-  assert.match(preload, /Math\.log2\(a\.referenceFrequency/);
+  const preload = section(audio, 'private async runPianoSamplePreload(', 'private stopVoiceNode(');
+  assert.match(preload, /visiblePianoSampleIds/);
+  assert.match(preload, /loadPianoSampleBuffer/);
+  assert.match(preload, /fetchEncodedPianoSample/);
+  assert.match(preload, /LOW_PRIORITY_FETCH_PAUSE_MS/);
   assert.match(preload, /this\.activeVoices\.size > 0 \|\| this\.pendingVoiceCount > 0/);
   assert.match(preload, /this\.preloadNeedsResume = true/);
+  assert.match(audio, /MAX_DECODED_PIANO_BYTES/);
+  assert.match(audio, /this\.sampleBufferCache\.delete\(sample.id\)/);
+  assert.match(audio, /private createAudioContextWithoutResume\(\)/);
 });
 
 test('successful piano playback clears readiness warnings', async () => {
