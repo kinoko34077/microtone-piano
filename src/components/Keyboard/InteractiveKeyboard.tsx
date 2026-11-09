@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {LayoutPreset, TuningPreset, AppSettings, LaneConfig} from '../../types/keyboard';
-import {encodeAddress} from '../../core/address';
+import {encodeAddress, isPlayableAddress} from '../../core/address';
 import {calculateFrequency, getFormattedPitchLabel, resolvePitch} from '../../core/pitch';
 import {globalAudioEngine} from '../../core/audio';
 import {getDepthFromBoundaries, getLaneBoundaries, getSegmentHeightsFromBoundaries} from '../../core/laneBoundaries';
@@ -171,7 +171,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
       const baseX = positiveModulo(absoluteColumn, period);
       const baseAddress = encodeAddress(baseX, isBlack, depth);
       const octOffset = Math.floor(absoluteColumn / period);
-      const pitchRef = layout.mapping[baseAddress];
+      const pitchRef = isPlayableAddress(layout, baseAddress) ? layout.mapping[baseAddress] : -1;
 
       if (pitchRef === undefined || pitchRef === -1) {
         return;
@@ -259,7 +259,20 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
       const pointerKey = `pointer_${move.pointerId}`;
       const currentItem = pressedPointersRef.current.get(pointerKey);
-      const newAddress = getAddressFromCoordinates(move.clientX, move.clientY);
+      const hitAddress = getAddressFromCoordinates(move.clientX, move.clientY);
+      // Reject inactive or unmapped glissando destinations before updating
+      // pressedAddresses. Rejected notes have no pointer record to clear later.
+      const baseAddress = hitAddress === null ? null : encodeAddress(
+        positiveModulo(startColumn + Math.floor(hitAddress / 16), period),
+        hitAddress % 16 >= 8,
+        hitAddress % 8,
+      );
+      const pitchRef = baseAddress === null ? -1 : layout.mapping[baseAddress];
+      const playable = baseAddress !== null &&
+        isPlayableAddress(layout, baseAddress) &&
+        pitchRef !== undefined && pitchRef !== -1 &&
+        resolvePitch(pitchRef, tuning).pitchDef !== null;
+      const newAddress = playable ? hitAddress : null;
 
       if (newAddress !== null) {
         if (!currentItem || currentItem.address !== newAddress) {
@@ -281,7 +294,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         stopPointerNote(pointerKey);
       }
     },
-    [getAddressFromCoordinates, startPointerNote, stopPointerNote],
+    [getAddressFromCoordinates, layout, period, startColumn, startPointerNote, stopPointerNote, tuning],
   );
 
   const flushPointerMoves = useCallback(() => {
@@ -424,7 +437,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         {segments.map(({depth, heightPercent, isInvalid}) => {
           const address = encodeAddress(x, false, depth);
           const baseAddress = encodeAddress(baseX, false, depth);
-          const pitchRef = layout.mapping[baseAddress];
+          const pitchRef = isPlayableAddress(layout, baseAddress) ? layout.mapping[baseAddress] : -1;
           const isPressed = heldAddressSet.has(address);
           const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchRef, tuning);
           const totalOctaveShift = tuningOctaveShift + octOffset;
@@ -497,7 +510,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         {segments.map(({depth, heightPercent, isInvalid}) => {
           const address = encodeAddress(x, true, depth);
           const baseAddress = encodeAddress(baseX, true, depth);
-          const pitchRef = layout.mapping[baseAddress];
+          const pitchRef = isPlayableAddress(layout, baseAddress) ? layout.mapping[baseAddress] : -1;
           const isPressed = heldAddressSet.has(address);
           const {pitchDef, octaveShift: tuningOctaveShift} = resolvePitch(pitchRef, tuning);
           const totalOctaveShift = tuningOctaveShift + logicalOctaveOffset;

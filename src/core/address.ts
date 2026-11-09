@@ -1,3 +1,5 @@
+import type {LayoutPreset} from '../types/keyboard';
+
 /**
  * 鍵盤番地 (`xxxx c ddd`) のユーティリティ
  */
@@ -34,6 +36,16 @@ export function decodeAddress(address: number): DecodedAddress {
     laneIndex,
     hexString,
   };
+}
+
+/** An inactive depth is not playable, even if a saved mapping remains there. */
+export function isPlayableAddress(layout: Pick<LayoutPreset, 'lanes'>, address: number): boolean {
+  if (!Number.isInteger(address) || address < 0 || address >= 256) {
+    return false;
+  }
+  const {laneIndex, depth} = decodeAddress(address);
+  const activeDepths = layout.lanes[laneIndex]?.activeDepths ?? 0;
+  return Number.isInteger(activeDepths) && activeDepths > depth && activeDepths <= 8;
 }
 
 export function laneToKeyInfo(laneIndex: number): {x: number; isBlack: boolean} {
