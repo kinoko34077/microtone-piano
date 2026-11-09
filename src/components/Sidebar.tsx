@@ -117,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     storageService.exportAsJson(pkg, `microtone_${currentLayout.name}_${currentTuning.name}.json`);
   };
 
-  const handleExportBinaryPackage = () => {
+  const handleExportBinaryPackage = async () => {
     const pkg = {
       type: 'MultiMicrotonalPackage',
       version: '1.0',
@@ -125,7 +125,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       layoutPreset: currentLayout,
       tuningPreset: currentTuning,
     };
-    storageService.exportAsBinaryPackage(pkg, `microtone_${currentLayout.name}_${currentTuning.name}.bin`);
+    try {
+      await storageService.exportAsBinaryPackage(pkg, `microtone_${currentLayout.name}_${currentTuning.name}.bin`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '不明なエラー';
+      window.alert(`BINの書き出しに失敗しました: ${message}`);
+    }
   };
 
   const handleFileImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
