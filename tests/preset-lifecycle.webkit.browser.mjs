@@ -374,11 +374,19 @@ test('#38 Linux WebKit unequal boundaries remain visible and pointer-targetable 
       };
       return {white: getHeights('white'), black: getHeights('black')};
     });
-    assert.deepEqual(geometry, {
-      white: {invalid: '12.5%', deep: '20%', shallow: '4.999999999999999%'},
-      black: {invalid: '12.5%', deep: '15%', shallow: '10%'},
-    }, 'Rendered keyboard must retain independent 80:20 white and 60:40 black proportions');
+    for (const [color, expected] of Object.entries({
+      white: {invalid: 12.5, deep: 20, shallow: 5},
+      black: {invalid: 12.5, deep: 15, shallow: 10},
+    })) {
+      for (const [part, percentage] of Object.entries(expected)) {
+        assert.ok(
+          Math.abs(Number.parseFloat(geometry[color][part]) - percentage) < 0.001,
+          `Unexpected ${color} ${part} height: ${geometry[color][part]}`,
+        );
+      }
+    }
 
+    await white.locator('[data-depth="1"]').scrollIntoViewIfNeeded();
     const target = await white.locator('[data-depth="1"]').boundingBox();
     assert.ok(target && target.height > 0);
     await page.mouse.move(target.x + target.width * 0.10, target.y + target.height * 0.5);
