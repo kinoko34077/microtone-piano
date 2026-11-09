@@ -45,6 +45,8 @@ export class AudioEngine {
   private pendingEncodedSamples: Map<string, Promise<ArrayBuffer>> = new Map();
   private visiblePianoSamples: Map<string, string[]> = new Map();
   private suspendedPreloadDecodeUnavailable = false;
+  private preloadGeneration = 0;
+  private preloadResumeDelayMs = 2000;
   private pendingVoices: Map<string, {address: number; cancelled: boolean}> = new Map();
   private voiceEpoch = 0;
   private preloadNeedsResume = false;
@@ -78,6 +80,7 @@ export class AudioEngine {
     try {
       const context = this.createAudioContextWithoutResume();
       await resumeAudioContextForPlayback(context);
+      this.suspendedPreloadDecodeUnavailable = false;
 
       this.emitAudioContextStatus({kind: 'ready', message: '音声を再生できます。'});
       return context;
@@ -114,11 +117,15 @@ export class AudioEngine {
     if (previous.length === sampleIds.length && previous.every((id, index) => id === sampleIds[index])) return;
     if (sampleIds.length) this.visiblePianoSamples.set(group, sampleIds);
     else this.visiblePianoSamples.delete(group);
+    this.preloadGeneration += 1;
     this.schedulePianoPreload(100);
   }
 
   public clearVisiblePianoFrequencies(group: string): void {
-    if (this.visiblePianoSamples.delete(group)) this.schedulePianoPreload(100);
+    if (this.visiblePianoSamples.delete(group)) {
+      this.preloadGeneration += 1;
+      this.schedulePianoPreload(100);
+    }
   }
 
   private visiblePianoSampleIds(): string[] {
@@ -405,7 +412,8 @@ export class AudioEngine {
       this.pianoPreloadPromise = null;
       if (this.preloadNeedsResume) {
         this.preloadNeedsResume = false;
-        this.schedulePianoPreload(2000);
+        this.schedulePianoPreload(this.preloadResumeDelayMs);
+        this.preloadResumeDelayMs = 2000;
       }
     });
     return this.pianoPreloadPromise;
@@ -419,6 +427,7 @@ export class AudioEngine {
     if (this.soundSource !== 'piano' || this.visiblePianoSamples.size === 0) return;
     if (this.pianoPreloadPromise) {
       this.preloadNeedsResume = true;
+      this.preloadResumeDelayMs = Math.min(this.preloadResumeDelayMs, delayMs);
       return;
     }
     this.pianoPreloadTimerId = window.setTimeout(() => {
@@ -597,6 +606,7 @@ export class AudioEngine {
 
   private async runPianoSamplePreload(): Promise<void> {
     const preferred = this.visiblePianoSampleIds();
+    const generation = this.preloadGeneration;
     if (!preferred.length) return;
     const samples = getActivePianoSamples();
     const byId = new Map(samples.map((sample) => [sample.id, sample]));
@@ -610,6 +620,10 @@ export class AudioEngine {
     }
     for (const id of preferred) {
       if (this.soundSource !== 'piano') return;
+      if (generation !== this.preloadGeneration) {
+        this.preloadNeedsResume = true;
+        return;
+      }
       if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
         this.preloadNeedsResume = true;
         return;
@@ -640,6 +654,10 @@ export class AudioEngine {
     // decoding them ahead of currently visible keys.
     for (const sample of samples) {
       if (this.soundSource !== 'piano' || this.visiblePianoSamples.size === 0) return;
+      if (generation !== this.preloadGeneration) {
+        this.preloadNeedsResume = true;
+        return;
+      }
       if (this.visiblePianoSampleIds().includes(sample.id)) continue;
       if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
         this.preloadNeedsResume = true;
