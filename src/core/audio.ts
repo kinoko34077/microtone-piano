@@ -15,7 +15,8 @@ export type AudioContextStatus = {
   message: string;
 };
 
-const PIANO_PRELOAD_CONCURRENCY = 1;
+const MAX_DECODED_PIANO_BYTES = 32 * 1024 * 1024;
+const LOW_PRIORITY_FETCH_PAUSE_MS = 160;
 
 interface VoiceNode {
   voiceId: string;
@@ -38,6 +39,12 @@ export class AudioEngine {
   private activeVoices: Map<string, VoiceNode> = new Map();
   private sampleBufferCache: Map<string, Promise<AudioBuffer>> = new Map();
   private decodedSampleCache: Map<string, AudioBuffer> = new Map();
+  // The 45 compressed assets are ~3.13 MB in total; keep them separately
+  // from the larger, bounded decoded PCM working set.
+  private encodedSampleCache: Map<string, ArrayBuffer> = new Map();
+  private pendingEncodedSamples: Map<string, Promise<ArrayBuffer>> = new Map();
+  private visiblePianoSamples: Map<string, string[]> = new Map();
+  private suspendedPreloadDecodeUnavailable = false;
   private pendingVoices: Map<string, {address: number; cancelled: boolean}> = new Map();
   private voiceEpoch = 0;
   private preloadNeedsResume = false;
@@ -69,17 +76,8 @@ export class AudioEngine {
     this.emitAudioContextStatus({kind: 'starting', message: '音声を準備中です。'});
 
     try {
-      if (!this.ctx || getRuntimeAudioContextState(this.ctx) === 'closed') {
-        const AudioCtxClass =
-          window.AudioContext ||
-          (window as unknown as {webkitAudioContext: typeof AudioContext}).webkitAudioContext;
-        this.ctx = new AudioCtxClass();
-        this.masterGain = this.ctx.createGain();
-        this.masterGain.gain.setValueAtTime(this.savedMasterVolume, this.ctx.currentTime);
-        this.masterGain.connect(this.ctx.destination);
-      }
-
-      await resumeAudioContextForPlayback(this.ctx);
+      const context = this.createAudioContextWithoutResume();
+      await resumeAudioContextForPlayback(context);
 
       this.emitAudioContextStatus({kind: 'ready', message: '音声を再生できます。'});
       return this.ctx;
@@ -90,6 +88,41 @@ export class AudioEngine {
       });
       throw error;
     }
+  }
+
+  // Prewarming may create a suspended decoder, but it must never resume or
+  // play audio outside the user's playback gesture (notably on iOS Safari).
+  private createAudioContextWithoutResume(): AudioContext {
+    if (!this.ctx || getRuntimeAudioContextState(this.ctx) === 'closed') {
+      const AudioCtxClass =
+        window.AudioContext ||
+        (window as unknown as {webkitAudioContext: typeof AudioContext}).webkitAudioContext;
+      this.ctx = new AudioCtxClass();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.setValueAtTime(this.savedMasterVolume, this.ctx.currentTime);
+      this.masterGain.connect(this.ctx.destination);
+    }
+    return this.ctx;
+  }
+
+  public setVisiblePianoFrequencies(group: string, frequencies: number[]): void {
+    const sampleIds = [...new Set(frequencies
+      .filter((frequency) => Number.isFinite(frequency) && frequency > 0)
+      .map((frequency) => findNearestPianoSample(frequency)?.id)
+      .filter((id): id is string => Boolean(id)))];
+    const previous = this.visiblePianoSamples.get(group) ?? [];
+    if (previous.length === sampleIds.length && previous.every((id, index) => id === sampleIds[index])) return;
+    if (sampleIds.length) this.visiblePianoSamples.set(group, sampleIds);
+    else this.visiblePianoSamples.delete(group);
+    this.schedulePianoPreload(100);
+  }
+
+  public clearVisiblePianoFrequencies(group: string): void {
+    if (this.visiblePianoSamples.delete(group)) this.schedulePianoPreload(100);
+  }
+
+  private visiblePianoSampleIds(): string[] {
+    return [...new Set([...this.visiblePianoSamples.values()].flat())];
   }
 
   public async retryAudioContext(): Promise<AudioContext> {
@@ -366,37 +399,36 @@ export class AudioEngine {
   }
 
   public async preloadPianoSamples(): Promise<void> {
-    if (this.soundSource !== 'piano') {
-      return;
-    }
-    if (this.pianoPreloadPromise) {
-      return this.pianoPreloadPromise;
-    }
-
+    if (this.soundSource !== 'piano' || this.visiblePianoSamples.size === 0) return;
+    if (this.pianoPreloadPromise) return this.pianoPreloadPromise;
     this.pianoPreloadPromise = this.runPianoSamplePreload().finally(() => {
       this.pianoPreloadPromise = null;
       if (this.preloadNeedsResume) {
         this.preloadNeedsResume = false;
-        this.schedulePianoPreload();
+        this.schedulePianoPreload(2000);
       }
     });
     return this.pianoPreloadPromise;
   }
 
-  private schedulePianoPreload() {
-    if (this.pianoPreloadTimerId !== null || this.pianoPreloadPromise) {
+  private schedulePianoPreload(delayMs: number = 2000) {
+    if (this.pianoPreloadTimerId !== null) {
+      window.clearTimeout(this.pianoPreloadTimerId);
+      this.pianoPreloadTimerId = null;
+    }
+    if (this.soundSource !== 'piano' || this.visiblePianoSamples.size === 0) return;
+    if (this.pianoPreloadPromise) {
+      this.preloadNeedsResume = true;
       return;
     }
-
-    // Keep full-sample decoding out of the first interaction and glissando path.
     this.pianoPreloadTimerId = window.setTimeout(() => {
       this.pianoPreloadTimerId = null;
-      if (this.activeVoices.size === 0 && this.pendingVoiceCount === 0) {
-        void this.preloadPianoSamples();
+      if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
+        this.schedulePianoPreload(2000);
       } else {
-        this.schedulePianoPreload();
+        void this.preloadPianoSamples();
       }
-    }, 2000);
+    }, delayMs);
   }
 
   private checkSustainRelease() {
@@ -510,13 +542,19 @@ export class AudioEngine {
         message: 'ピアノ音源を準備中です。',
       });
       try {
-        buffer = await this.loadPianoSampleBuffer(sample);
+        buffer = await this.loadPianoSampleBuffer(sample, ctx);
       } catch {
-        this.emitPianoSampleStatus({
+        // A pre-gesture decoder may fail on Safari; retry using the now
+        // running playback context and the already-fetched compressed bytes.
+        try {
+          buffer = await this.loadPianoSampleBuffer(sample, ctx);
+        } catch {
+          this.emitPianoSampleStatus({
           kind: 'error',
           message: 'ピアノ音源を読み込めませんでした。通信状態を確認してください。',
-        });
-        return null;
+          });
+          return null;
+        }
       }
     }
     // A released touch or layout/source switch must not sound after decoding.
@@ -558,59 +596,118 @@ export class AudioEngine {
   }
 
   private async runPianoSamplePreload(): Promise<void> {
-    await this.ensureAudioContext();
-    // Decode the commonly played central register first rather than file
-    // numbering (which starts at the bottom of the piano).
-    const samples = getActivePianoSamples().sort(
-      (a, b) => Math.abs(Math.log2(a.referenceFrequency / 261.625565)) -
-        Math.abs(Math.log2(b.referenceFrequency / 261.625565)),
-    );
-    let nextIndex = 0;
-
-    const worker = async () => {
-      while (nextIndex < samples.length) {
-        // Stop background decoding as soon as performance resumes: decoding
-        // additional unrelated samples during a chord can stall the UI/audio.
-        if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
-          this.preloadNeedsResume = true;
-          break;
-        }
-        const sample = samples[nextIndex];
-        nextIndex += 1;
-        if (!sample || this.decodedSampleCache.has(sample.id)) {
-          continue;
-        }
-        try {
-          await this.loadPianoSampleBuffer(sample);
-        } catch {
-          // Missing or unsupported samples are retried by direct note requests.
-        }
+    const preferred = this.visiblePianoSampleIds();
+    if (!preferred.length) return;
+    const samples = getActivePianoSamples();
+    const byId = new Map(samples.map((sample) => [sample.id, sample]));
+    let context: AudioContext | null = null;
+    try {
+      context = this.createAudioContextWithoutResume();
+    } catch {
+      // A browser can disallow constructing a context before a gesture.
+      // Keep compressed bytes ready and let noteOn decode after resume.
+      this.suspendedPreloadDecodeUnavailable = true;
+    }
+    for (const id of preferred) {
+      if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
+        this.preloadNeedsResume = true;
+        return;
       }
-    };
-
-    await Promise.all(
-      Array.from({length: Math.min(PIANO_PRELOAD_CONCURRENCY, samples.length)}, () => worker()),
-    );
-  }
-
-  private async loadPianoSampleBuffer(sample: PianoSampleDefinition): Promise<AudioBuffer> {
-    const cached = this.decodedSampleCache.get(sample.id);
-    if (cached) {
-      return cached;
+      if (!this.visiblePianoSampleIds().includes(id)) {
+        this.preloadNeedsResume = true;
+        return;
+      }
+      const sample = byId.get(id);
+      if (!sample) continue;
+      try {
+        // Do not thrash the PCM cache on huge screens/two-row displays.
+        const cacheBytes = this.decodedPianoCacheBytes();
+        if (context && !this.suspendedPreloadDecodeUnavailable &&
+            (this.decodedSampleCache.has(id) || cacheBytes < MAX_DECODED_PIANO_BYTES - 2 * 1024 * 1024)) {
+          await this.loadPianoSampleBuffer(sample, context);
+        } else {
+          await this.fetchEncodedPianoSample(sample);
+        }
+      } catch {
+        // Unsupported suspended-context decoding is recoverable on playback.
+        // Encoded bytes remain cached, so a first gesture can retry.
+        if (this.encodedSampleCache.has(id)) this.suspendedPreloadDecodeUnavailable = true;
+      }
     }
 
-    const ctx = await this.ensureAudioContext();
-    let pending = this.sampleBufferCache.get(sample.id);
+    // Off-screen files are compact. Fetch only; never spend playback CPU time
+    // decoding them ahead of currently visible keys.
+    for (const sample of samples) {
+      if (this.visiblePianoSampleIds().includes(sample.id)) continue;
+      if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
+        this.preloadNeedsResume = true;
+        return;
+      }
+      try {
+        await this.fetchEncodedPianoSample(sample);
+      } catch {
+        // A failed background fetch is retried on demand.
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, LOW_PRIORITY_FETCH_PAUSE_MS));
+    }
+  }
 
+  private decodedPianoCacheBytes(): number {
+    let bytes = 0;
+    for (const buffer of this.decodedSampleCache.values()) {
+      bytes += buffer.length * buffer.numberOfChannels * 4;
+    }
+    return bytes;
+  }
+
+  private rememberDecodedPianoSample(id: string, buffer: AudioBuffer): void {
+    const size = buffer.length * buffer.numberOfChannels * 4;
+    if (size > MAX_DECODED_PIANO_BYTES) return;
+    this.decodedSampleCache.delete(id);
+    let bytes = this.decodedPianoCacheBytes();
+    const preferred = new Set(this.visiblePianoSampleIds());
+    while (bytes + size > MAX_DECODED_PIANO_BYTES && this.decodedSampleCache.size) {
+      const victim = [...this.decodedSampleCache.keys()].find((key) => !preferred.has(key)) ??
+        this.decodedSampleCache.keys().next().value;
+      if (!victim) break;
+      const previous = this.decodedSampleCache.get(victim)!;
+      bytes -= previous.length * previous.numberOfChannels * 4;
+      this.decodedSampleCache.delete(victim);
+    }
+    this.decodedSampleCache.set(id, buffer);
+  }
+
+  private async fetchEncodedPianoSample(sample: PianoSampleDefinition): Promise<ArrayBuffer> {
+    const cached = this.encodedSampleCache.get(sample.id);
+    if (cached) return cached;
+    const pending = this.pendingEncodedSamples.get(sample.id);
+    if (pending) return pending;
+    const request = fetch(sample.url)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Failed to fetch sample: ${sample.fileName}`);
+        const data = await response.arrayBuffer();
+        this.encodedSampleCache.set(sample.id, data);
+        return data;
+      })
+      .finally(() => this.pendingEncodedSamples.delete(sample.id));
+    this.pendingEncodedSamples.set(sample.id, request);
+    return request;
+  }
+
+  private async loadPianoSampleBuffer(sample: PianoSampleDefinition, context: AudioContext): Promise<AudioBuffer> {
+    const cached = this.decodedSampleCache.get(sample.id);
+    if (cached) {
+      // Refresh the working-set order for actual playback.
+      this.decodedSampleCache.delete(sample.id);
+      this.decodedSampleCache.set(sample.id, cached);
+      return cached;
+    }
+    let pending = this.sampleBufferCache.get(sample.id);
     if (!pending) {
-      pending = fetch(sample.url)
-        .then(async (response) => {
-          if (!response.ok) {
-            throw new Error(`Failed to fetch sample: ${sample.fileName}`);
-          }
-          const data = await response.arrayBuffer();
-          const buffer = await ctx.decodeAudioData(data.slice(0));
-          this.decodedSampleCache.set(sample.id, buffer);
+      pending = this.fetchEncodedPianoSample(sample)
+        .then((data) => context.decodeAudioData(data.slice(0)))
+        .then((buffer) => {
+          this.rememberDecodedPianoSample(sample.id, buffer);
           return buffer;
         })
         .catch((error) => {
@@ -619,7 +716,6 @@ export class AudioEngine {
         });
       this.sampleBufferCache.set(sample.id, pending);
     }
-
     return pending;
   }
 
