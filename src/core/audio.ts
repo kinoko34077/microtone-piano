@@ -44,6 +44,7 @@ export class AudioEngine {
   private encodedSampleCache: Map<string, ArrayBuffer> = new Map();
   private pendingEncodedSamples: Map<string, Promise<ArrayBuffer>> = new Map();
   private visiblePianoSamples: Map<string, string[]> = new Map();
+  private visiblePianoFrequenciesByGroup: Map<string, number[]> = new Map();
   private suspendedPreloadDecodeUnavailable = false;
   private preloadGeneration = 0;
   private preloadResumeDelayMs = 2000;
@@ -108,11 +109,14 @@ export class AudioEngine {
     return this.ctx;
   }
 
-  public setVisiblePianoFrequencies(group: string, frequencies: number[]): void {
-    const sampleIds = [...new Set(frequencies
+  private sampleIdsForFrequencies(frequencies: number[]): string[] {
+    return [...new Set(frequencies
       .filter((frequency) => Number.isFinite(frequency) && frequency > 0)
       .map((frequency) => findNearestPianoSample(frequency)?.id)
       .filter((id): id is string => Boolean(id)))];
+  }
+
+  private updateVisibleSampleIds(group: string, sampleIds: string[]): void {
     const previous = this.visiblePianoSamples.get(group) ?? [];
     if (previous.length === sampleIds.length && previous.every((id, index) => id === sampleIds[index])) return;
     if (sampleIds.length) this.visiblePianoSamples.set(group, sampleIds);
@@ -121,11 +125,22 @@ export class AudioEngine {
     this.schedulePianoPreload(100);
   }
 
-  public clearVisiblePianoFrequencies(group: string): void {
-    if (this.visiblePianoSamples.delete(group)) {
-      this.preloadGeneration += 1;
-      this.schedulePianoPreload(100);
+  public setVisiblePianoFrequencies(group: string, frequencies: number[]): void {
+    if (frequencies.length) this.visiblePianoFrequenciesByGroup.set(group, frequencies);
+    else this.visiblePianoFrequenciesByGroup.delete(group);
+    this.updateVisibleSampleIds(group, this.sampleIdsForFrequencies(frequencies));
+  }
+
+  /** Called after a tuning/sample-reference update, before background work. */
+  public refreshVisiblePianoSampleMappings(): void {
+    for (const [group, frequencies] of this.visiblePianoFrequenciesByGroup) {
+      this.updateVisibleSampleIds(group, this.sampleIdsForFrequencies(frequencies));
     }
+  }
+
+  public clearVisiblePianoFrequencies(group: string): void {
+    this.visiblePianoFrequenciesByGroup.delete(group);
+    this.updateVisibleSampleIds(group, []);
   }
 
   private visiblePianoSampleIds(): string[] {
