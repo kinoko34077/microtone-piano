@@ -165,8 +165,11 @@ export class AudioEngine {
       return `invalid_${address}_${pitchId}_${pointerId ?? 'mouse'}_${timestamp}`;
     }
 
+    // A stop/source switch during the asynchronous AudioContext startup
+    // invalidates the original key event, even before a voice ID exists.
+    const admissionEpoch = this.voiceEpoch;
     const ctx = await this.ensureAudioContext();
-    if (shouldStart?.() === false) {
+    if (admissionEpoch !== this.voiceEpoch || shouldStart?.() === false) {
       return `cancelled_${address}_${pitchId}_${Date.now()}`;
     }
     const now = ctx.currentTime;
@@ -291,8 +294,9 @@ export class AudioEngine {
     }).finally(() => {
       // Preserve the cancellation token until the source is either registered
       // or definitively discarded, never just until decoding completes.
-      this.pendingVoices.delete(voiceId);
-      this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
+      if (this.pendingVoices.delete(voiceId)) {
+        this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
+      }
     });
     return voiceId;
   }
@@ -407,42 +411,53 @@ export class AudioEngine {
   }
 
   private trimVoicesIfNeeded(now: number) {
-    if (this.activeVoices.size + this.pendingVoiceCount < this.maxPolyphony) {
-      return;
-    }
+    // Pending sample voices consume admission slots just like active voices.
+    // Keep the existing released/sustained/oldest-active stealing priority;
+    // if *all* slots are pending, cancel and uncount the oldest pending token.
+    while (this.activeVoices.size + this.pendingVoiceCount >= this.maxPolyphony) {
+      let candidateKey: string | null = null;
+      let oldestTime = Infinity;
 
-    let candidateKey: string | null = null;
-    let oldestTime = Infinity;
-
-    for (const [key, voice] of this.activeVoices.entries()) {
-      if (voice.isReleased && voice.isSustained && voice.startTime < oldestTime) {
-        oldestTime = voice.startTime;
-        candidateKey = key;
-      }
-    }
-
-    if (!candidateKey) {
-      oldestTime = Infinity;
       for (const [key, voice] of this.activeVoices.entries()) {
-        if (voice.isReleased && voice.startTime < oldestTime) {
+        if (voice.isReleased && voice.isSustained && voice.startTime < oldestTime) {
           oldestTime = voice.startTime;
           candidateKey = key;
         }
       }
-    }
 
-    if (!candidateKey) {
-      oldestTime = Infinity;
-      for (const [key, voice] of this.activeVoices.entries()) {
-        if (voice.startTime < oldestTime) {
-          oldestTime = voice.startTime;
-          candidateKey = key;
+      if (!candidateKey) {
+        oldestTime = Infinity;
+        for (const [key, voice] of this.activeVoices.entries()) {
+          if (voice.isReleased && voice.startTime < oldestTime) {
+            oldestTime = voice.startTime;
+            candidateKey = key;
+          }
         }
       }
-    }
 
-    if (candidateKey) {
-      this.stopVoiceNode(candidateKey, now, 0.01);
+      if (!candidateKey) {
+        oldestTime = Infinity;
+        for (const [key, voice] of this.activeVoices.entries()) {
+          if (voice.startTime < oldestTime) {
+            oldestTime = voice.startTime;
+            candidateKey = key;
+          }
+        }
+      }
+
+      if (candidateKey) {
+        this.stopVoiceNode(candidateKey, now, 0.01);
+        continue;
+      }
+
+      const oldestPending = this.pendingVoices.entries().next().value;
+      if (!oldestPending) break;
+      const [pendingId, pending] = oldestPending;
+      pending.cancelled = true;
+      this.pendingVoices.delete(pendingId);
+      this.pendingVoiceCount = Math.max(0, this.pendingVoiceCount - 1);
+      // The async decode closure still holds the cancelled token, so it
+      // cannot register a late source after its admission slot was reclaimed.
     }
   }
 
