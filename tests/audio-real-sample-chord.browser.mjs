@@ -123,6 +123,12 @@ test('#30 real M4A cold/warm chord schedule timing (5 isolated repeats per group
                 performance.now() < deadline) {
                 await new Promise(resolve => setTimeout(resolve, 20));
               }
+              // AudioBufferSourceNode.start() fires before the async voice
+              // registration/finally microtasks finish. Do not misreport
+              // transient pending entries as leaked voices.
+              while (engine.pendingVoiceCount > 0 && performance.now() < deadline) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+              }
               const starts = observed.start.slice(startIndex);
               const started = starts.slice(0, frequencies.length);
               const requestSamples = observed.fetch.slice(fetchIndex);
