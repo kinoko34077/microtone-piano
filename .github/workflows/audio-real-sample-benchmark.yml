@@ -1,0 +1,29 @@
+name: Real M4A chord timing benchmark
+
+# Opt-in for performance investigations; never gate every audio code change
+# on noisy, shared-runner latency measurements.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tests/audio-real-sample-chord.browser.mjs"
+      - ".github/workflows/audio-real-sample-benchmark.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install deterministic Chromium client
+        run: npm install --no-save --no-package-lock puppeteer-core@24
+      - name: Measure actual M4A fetch / decode / source-scheduling stages
+        run: node --test tests/audio-real-sample-chord.browser.mjs
