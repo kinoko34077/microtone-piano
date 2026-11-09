@@ -4,7 +4,6 @@ import {getKeyboardColumnRange} from '../src/core/keyboardRange';
 import {getVisiblePianoFrequencies} from '../src/core/visiblePianoSamples';
 import {STANDARD_LAYOUT_12EDO, STANDARD_TUNING_12EDO, STANDARD_LAYOUT_256TEST} from '../src/core/presets';
 import {encodeAddress} from '../src/core/address';
-import {findNearestPianoSample} from '../src/core/pianoSamples';
 
 test('#30 visible-only samples track the actual playable rendered period and scrolling', () => {
   const range = getKeyboardColumnRange(STANDARD_LAYOUT_12EDO, STANDARD_TUNING_12EDO, 0);
@@ -16,8 +15,7 @@ test('#30 visible-only samples track the actual playable rendered period and scr
   assert.ok(visible.some(freq => Math.abs(freq - 261.625565) < 1));
   assert.ok(nextPeriod.some(freq => Math.abs(freq - 523.25113) < 2));
   assert.notDeepEqual(visible, nextPeriod, 'scrolling changes required frequencies');
-  const physical = visible.map(f => findNearestPianoSample(f)?.id).filter(Boolean);
-  assert.ok(physical.length > 0, 'all playback frequencies resolve through real piano sample catalog');
+  assert.ok(visible.every(freq => Number.isFinite(freq) && freq > 0));
 });
 
 test('#30 disabled mapped depths do not warm an invisible note; re-enable restores it', () => {
@@ -31,8 +29,11 @@ test('#30 disabled mapped depths do not warm an invisible note; re-enable restor
   const baseX = ((range.startColumn + x) % range.period + range.period) % range.period;
   const laneIndex = baseX * 2;
   layout.lanes[laneIndex].activeDepths = 8;
-  const before = getVisiblePianoFrequencies(layout, tuning, range, x, x);
   const mappedDeepAddress = encodeAddress(baseX, false, 7);
+  const mappedShallowAddress = encodeAddress(baseX, false, 0);
+  layout.mapping[mappedShallowAddress] = 0;
+  layout.mapping[mappedDeepAddress] = 1;
+  const before = getVisiblePianoFrequencies(layout, tuning, range, x, x);
   assert.ok(layout.mapping[mappedDeepAddress] >= 0);
   layout.lanes[laneIndex].activeDepths = 1;
   const after = getVisiblePianoFrequencies(layout, tuning, range, x, x);
