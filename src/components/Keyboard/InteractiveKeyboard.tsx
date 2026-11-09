@@ -259,7 +259,20 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
       const pointerKey = `pointer_${move.pointerId}`;
       const currentItem = pressedPointersRef.current.get(pointerKey);
-      const newAddress = getAddressFromCoordinates(move.clientX, move.clientY);
+      const hitAddress = getAddressFromCoordinates(move.clientX, move.clientY);
+      // Reject inactive or unmapped glissando destinations before updating
+      // pressedAddresses. Rejected notes have no pointer record to clear later.
+      const baseAddress = hitAddress === null ? null : encodeAddress(
+        positiveModulo(startColumn + Math.floor(hitAddress / 16), period),
+        hitAddress % 16 >= 8,
+        hitAddress % 8,
+      );
+      const pitchRef = baseAddress === null ? -1 : layout.mapping[baseAddress];
+      const playable = baseAddress !== null &&
+        isPlayableAddress(layout, baseAddress) &&
+        pitchRef !== undefined && pitchRef !== -1 &&
+        resolvePitch(pitchRef, tuning).pitchDef !== null;
+      const newAddress = playable ? hitAddress : null;
 
       if (newAddress !== null) {
         if (!currentItem || currentItem.address !== newAddress) {
@@ -281,7 +294,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
         stopPointerNote(pointerKey);
       }
     },
-    [getAddressFromCoordinates, startPointerNote, stopPointerNote],
+    [getAddressFromCoordinates, layout, period, startColumn, startPointerNote, stopPointerNote, tuning],
   );
 
   const flushPointerMoves = useCallback(() => {
