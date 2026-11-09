@@ -281,7 +281,8 @@ test("#37 Chromium import is durable, collision-safe, and atomic on write reject
     let second;
     for(let i=0;i<90;i++){
       second=await state();
-      if(second.layoutCount===first.layoutCount+1&&second.tuningCount===first.tuningCount+1)break;
+      if(second.layoutCount===first.layoutCount+1&&second.tuningCount===first.tuningCount+1&&
+        second.layoutId!==first.layoutId&&second.tuningId!==first.tuningId)break;
       await new Promise(resolve=>setTimeout(resolve,100));
     }
     assert.ok(second.layoutId!==first.layoutId,"Repeated import creates a new ID rather than overwrite");
