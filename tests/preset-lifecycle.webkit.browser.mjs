@@ -312,3 +312,85 @@ test('#37 Linux WebKit: imported JSON package registers both presets and survive
     server.kill('SIGTERM');
   }
 });
+
+
+test('#38 Linux WebKit unequal boundaries remain visible and pointer-targetable with invalid slots', {timeout: 150000}, async () => {
+  const port = 8802;
+  const server = await startPreview(port);
+  let browser;
+  try {
+    browser = await webkit.launch({headless: true});
+    const context = await browser.newContext({viewport: {width: 990, height: 750}, acceptDownloads: true});
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto('http://127.0.0.1:' + port + '/');
+    await openMenu(page);
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', {timeout: 25000}),
+      page.getByRole('button', {name: 'JSON', exact: true}).click(),
+    ]);
+    const pkg = JSON.parse(await readFile(await download.path(), 'utf8'));
+    for (let x = 0; x < 16; x++) {
+      const whiteLane = pkg.layoutPreset.lanes[x * 2];
+      const blackLane = pkg.layoutPreset.lanes[x * 2 + 1];
+      whiteLane.activeDepths = 2;
+      blackLane.activeDepths = 2;
+      whiteLane.customBoundaries = [0, 0.8, 1];
+      blackLane.customBoundaries = [0, 0.6, 1];
+      const whiteAddress = x * 16;
+      const blackAddress = x * 16 + 8;
+      pkg.layoutPreset.mapping[whiteAddress + 1] = pkg.layoutPreset.mapping[whiteAddress];
+      if (pkg.layoutPreset.mapping[blackAddress] === -1)
+        pkg.layoutPreset.mapping[blackAddress] = pkg.layoutPreset.mapping[whiteAddress];
+      pkg.layoutPreset.mapping[blackAddress + 1] = pkg.layoutPreset.mapping[blackAddress];
+    }
+
+    await page.locator('input[type="file"][accept=".json,.bin"]').setInputFiles({
+      name: 'unequal-preview.json', mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify(pkg)),
+    });
+    await page.waitForFunction(() => document.querySelector('#layout-select')
+      ?.value?.startsWith('layout_custom_import_'), {timeout: 10000});
+    await page.locator('#sound-source').selectOption('sawtooth');
+    await page.getByRole('button', {name: /詳細設定/}).click();
+    await page.getByLabel('無効区画を表示する').check();
+    await page.locator('button[aria-label="設定メニューを閉じる"]').click();
+
+    const white = page.locator('[data-key-color="white"]').first();
+    const black = page.locator('[data-key-color="black"]').first();
+    await white.locator('[data-depth="1"]').waitFor();
+    await black.locator('[data-depth="1"]').waitFor();
+    const geometry = await page.evaluate(() => {
+      const getHeights = color => {
+        const lane = document.querySelector('[data-key-color="' + color + '"]');
+        const depthHeight = depth => lane.querySelector('[data-depth="' + depth + '"]')?.style.height;
+        return {
+          invalid: depthHeight(7),
+          deep: depthHeight(1),
+          shallow: depthHeight(0),
+        };
+      };
+      return {white: getHeights('white'), black: getHeights('black')};
+    });
+    assert.deepEqual(geometry, {
+      white: {invalid: '12.5%', deep: '20%', shallow: '4.999999999999999%'},
+      black: {invalid: '12.5%', deep: '15%', shallow: '10%'},
+    }, 'Rendered keyboard must retain independent 80:20 white and 60:40 black proportions');
+
+    const target = await white.locator('[data-depth="1"]').boundingBox();
+    assert.ok(target && target.height > 0);
+    await page.mouse.move(target.x + target.width * 0.10, target.y + target.height * 0.5);
+    await page.mouse.down();
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-key-color="white"] [data-depth="1"]')]
+      .some(el => el.className.includes('from-amber-300')), {timeout: 6000});
+    await page.mouse.up();
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log('WEBKIT_INVALID_PREVIEW_BOUNDARIES_PASS', JSON.stringify(geometry));
+  } finally {
+    await browser?.close();
+    server.kill('SIGTERM');
+  }
+});
