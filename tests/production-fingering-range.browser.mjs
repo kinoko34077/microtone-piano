@@ -137,6 +137,27 @@ async function runMatrixGroup(page,cdp,label,targets,family,mode,cycles=20) {
   await page.evaluate(id=>{window.__fingerMatrix.phase=id;},label+'-warmup');
   await touch(cdp,first,300,210);
   await page.evaluate(()=>{window.__fingerMatrix.phase=null;});
+  const firstChord = await page.evaluate(({id, expected}) => {
+    const p=window.__fingerMatrix;
+    const downs=p.downs.filter(v=>v.phase===id);
+    const ups=p.ups.filter(v=>v.phase===id);
+    const starts=p.starts.filter(v=>v.phase===id);
+    const eventAt=downs.length?Math.min(...downs.map(x=>x.at)):null;
+    const releasedAt=ups.length?Math.max(...ups.map(x=>x.at)):null;
+    return {
+      expected,downs:downs.length,ups:ups.length,starts:starts.length,
+      firstChordLastStartMs:eventAt!==null&&starts.length?
+        Math.round((Math.max(...starts.map(x=>x.at))-eventAt)*100)/100:null,
+      postRelease:starts.filter(x=>releasedAt!==null&&x.at>releasedAt).length,
+      sampleBuffers:[...new Set(starts.map(x=>x.sampleId))],
+    };
+  },{id:label+'-warmup',expected:first.length});
+  console.log('FINGERING_FIRST_AFTER_GROUP_CHANGE',JSON.stringify({group:label,...firstChord}));
+  assert.equal(firstChord.downs,first.length);
+  assert.equal(firstChord.ups,first.length);
+  assert.equal(firstChord.postRelease,0,'new group sample started only after release: '+label);
+  // Record first held chord separately from steady-state; a cancellation of
+  // a not-ready sample is a real observation, not grounds to call warm latency.
   await pause(250);
 
   const signatures=new Set();
@@ -175,6 +196,7 @@ async function runMatrixGroup(page,cdp,label,targets,family,mode,cycles=20) {
     group:label,mode,family,cycles,fingers:first.length,
     uniqueChordSignatures:signatures.size,
     firstKeys:first.map(x=>x.signature),
+    firstChordAfterGroupSwitch:firstChord,
     receivedDowns:count('downs'),receivedUps:count('ups'),
     scheduledSourceStarts:count('starts'),
     expected,lateStarts:count('late'),suspendedStarts:count('suspended'),
