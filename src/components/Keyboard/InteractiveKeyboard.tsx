@@ -4,7 +4,8 @@ import {encodeAddress, isPlayableAddress} from '../../core/address';
 import {calculateFrequency, getFormattedPitchLabel, resolvePitch} from '../../core/pitch';
 import {globalAudioEngine} from '../../core/audio';
 import {getLaneDisplaySegments, getDepthFromDisplaySegments} from '../../core/laneBoundaries';
-import {getKeyboardColumnRange} from '../../core/keyboardRange';
+import {getKeyboardColumnRange, isBlackColumnInDisplayPitchRange} from '../../core/keyboardRange';
+import {getVisiblePianoFrequencies} from '../../core/visiblePianoSamples';
 
 interface InteractiveKeyboardProps {
   layout: LayoutPreset;
@@ -15,6 +16,7 @@ interface InteractiveKeyboardProps {
   onMaxScrollOffsetChange?: (offset: number) => void;
   externalPressedAddresses?: Set<number>;
   initialFocusColumn?: number;
+  preloadGroupId?: string;
 }
 
 type PointerPressState = {
@@ -44,6 +46,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
   onMaxScrollOffsetChange,
   externalPressedAddresses,
   initialFocusColumn,
+  preloadGroupId = 'lower',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pressTokenRef = useRef(0);
@@ -84,6 +87,21 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     },
     [layout, period, startColumn],
   );
+
+  // Each mounted row registers its actual visible notes. AudioEngine merges
+  // both rows and deduplicates their physical samples by file ID.
+  const visiblePianoFrequencies = useMemo(
+    () => viewportWidth > 0 && settings.soundSource === 'piano'
+      ? getVisiblePianoFrequencies(
+          layout, tuning, columnRange, visibleColumnRange.start, visibleColumnRange.end,
+        )
+      : [],
+    [layout, tuning, columnRange, visibleColumnRange, viewportWidth, settings.soundSource],
+  );
+  useEffect(() => {
+    globalAudioEngine.setVisiblePianoFrequencies(preloadGroupId, visiblePianoFrequencies);
+    return () => globalAudioEngine.clearVisiblePianoFrequencies(preloadGroupId);
+  }, [preloadGroupId, visiblePianoFrequencies]);
 
   const getAddressFromCoordinates = useCallback(
     (clientX: number, clientY: number): number | null => {
@@ -566,6 +584,7 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
     <div className="flex h-full w-full flex-col overflow-hidden bg-[#0d1117]">
       <div
         ref={containerRef}
+        data-keyboard-viewport={preloadGroupId}
         className="relative flex flex-1 cursor-pointer select-none overflow-x-auto overflow-y-hidden p-0 touch-none"
         onScroll={handleScroll}
         onPointerDown={handlePointerDown}
@@ -601,27 +620,4 @@ export const InteractiveKeyboard: React.FC<InteractiveKeyboardProps> = ({
 
 function positiveModulo(value: number, modulo: number): number {
   return ((value % modulo) + modulo) % modulo;
-}
-
-function isBlackColumnInDisplayPitchRange(absoluteColumn: number, period: number): boolean {
-  if (period !== 7) {
-    return true;
-  }
-
-  const baseX = positiveModulo(absoluteColumn, period);
-  const repeat = Math.floor(absoluteColumn / period);
-  const blackStepByWhiteColumn: Record<number, number> = {
-    0: 1,
-    1: 3,
-    3: 6,
-    4: 8,
-    5: 10,
-  };
-  const blackStep = blackStepByWhiteColumn[baseX];
-  if (blackStep === undefined) {
-    return false;
-  }
-
-  const midi = 60 + repeat * 12 + blackStep;
-  return midi >= 9 && midi <= 120;
 }

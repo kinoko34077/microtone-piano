@@ -139,3 +139,68 @@ test('#30 allNotesOff during audio startup prevents the earlier note from soundi
     h.server.kill('SIGTERM');
   }
 });
+
+
+test('#30 rendered keyboard prewarms real samples, two-row union and scroll reprioritization', {timeout: 90000}, async () => {
+  const h = await launchHarness();
+  try {
+    await h.page.waitForFunction(async () => {
+      const {globalAudioEngine: engine} = await import('/src/core/audio.ts');
+      return (engine.visiblePianoSamples.get('lower')?.length ?? 0) > 0 &&
+        engine.decodedSampleCache.size > 0;
+    }, {timeout: 25000});
+    const initial = await h.page.evaluate(async () => {
+      const {globalAudioEngine: engine} = await import('/src/core/audio.ts');
+      return {ids: engine.visiblePianoSamples.get('lower'), decoded: engine.decodedSampleCache.size,
+        encoded: engine.encodedSampleCache.size,
+        resumeStatus: engine.ctx?.state ?? null};
+    });
+    assert.ok(initial.ids.length > 0);
+    assert.ok(initial.decoded > 0, 'at least one actual M4A buffer must decode before the first keypress');
+    assert.ok(initial.encoded >= initial.decoded);
+    console.log('VISIBLE_PREWARM_FIRST_VIEW', JSON.stringify(initial));
+
+    await h.page.evaluate(() => {
+      const viewport = document.querySelector('[data-keyboard-viewport="lower"]');
+      assertViewport(viewport);
+      viewport.scrollLeft = Math.min(viewport.scrollWidth - viewport.clientWidth, viewport.scrollLeft + 800);
+      viewport.dispatchEvent(new Event('scroll', {bubbles: true}));
+      function assertViewport(node) { if (!node) throw Error('lower viewport missing'); }
+    });
+    await h.page.waitForFunction(async (initialIds) => {
+      const {globalAudioEngine: engine} = await import('/src/core/audio.ts');
+      return JSON.stringify(engine.visiblePianoSamples.get('lower')) !== JSON.stringify(initialIds);
+    }, {timeout: 10000}, initial.ids);
+
+    await h.page.click('button[aria-label="メニューを開く"]');
+    await h.page.evaluate(() => {
+      const toggle = [...document.querySelectorAll('label')].find(label =>
+        label.textContent.includes('上下2段で表示する'))?.querySelector('input');
+      if (!toggle) throw Error('two-row toggle missing');
+      toggle.click();
+    });
+    await h.page.waitForFunction(async () => {
+      const {globalAudioEngine: engine} = await import('/src/core/audio.ts');
+      return document.querySelectorAll('[data-keyboard-viewport]').length === 2 &&
+        (engine.visiblePianoSamples.get('upper')?.length ?? 0) > 0 &&
+        (engine.visiblePianoSamples.get('lower')?.length ?? 0) > 0;
+    }, {timeout: 10000});
+    const twoRow = await h.page.evaluate(async () => {
+      const {globalAudioEngine: engine} = await import('/src/core/audio.ts');
+      const upper = engine.visiblePianoSamples.get('upper');
+      const lower = engine.visiblePianoSamples.get('lower');
+      const bytes = [...engine.decodedSampleCache.values()].reduce(
+        (sum, buffer) => sum + buffer.length * buffer.numberOfChannels * 4, 0);
+      return {upper: upper.length, lower: lower.length,
+        unique: new Set([...upper, ...lower]).size, decodedBytes: bytes};
+    });
+    console.log('VISIBLE_PREWARM_TWO_ROWS', JSON.stringify(twoRow));
+    assert.ok(twoRow.upper > 0 && twoRow.lower > 0);
+    assert.ok(twoRow.unique <= twoRow.upper + twoRow.lower, 'shared samples are deduplicated');
+    assert.ok(twoRow.decodedBytes <= 32 * 1024 * 1024, 'decoded PCM exceeds hard memory budget');
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.browser.close();
+    h.server.kill('SIGTERM');
+  }
+});
