@@ -80,7 +80,7 @@ export class AudioEngine {
       await resumeAudioContextForPlayback(context);
 
       this.emitAudioContextStatus({kind: 'ready', message: '音声を再生できます。'});
-      return this.ctx;
+      return context;
     } catch (error) {
       this.emitAudioContextStatus({
         kind: 'failed',
@@ -609,6 +609,7 @@ export class AudioEngine {
       this.suspendedPreloadDecodeUnavailable = true;
     }
     for (const id of preferred) {
+      if (this.soundSource !== 'piano') return;
       if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
         this.preloadNeedsResume = true;
         return;
@@ -638,6 +639,7 @@ export class AudioEngine {
     // Off-screen files are compact. Fetch only; never spend playback CPU time
     // decoding them ahead of currently visible keys.
     for (const sample of samples) {
+      if (this.soundSource !== 'piano' || this.visiblePianoSamples.size === 0) return;
       if (this.visiblePianoSampleIds().includes(sample.id)) continue;
       if (this.activeVoices.size > 0 || this.pendingVoiceCount > 0) {
         this.preloadNeedsResume = true;
@@ -710,9 +712,10 @@ export class AudioEngine {
           this.rememberDecodedPianoSample(sample.id, buffer);
           return buffer;
         })
-        .catch((error) => {
+        .finally(() => {
+          // Resolved promises also retain their AudioBuffers. Do not let the
+          // in-flight table defeat the bounded decoded-cache eviction policy.
           this.sampleBufferCache.delete(sample.id);
-          throw error;
         });
       this.sampleBufferCache.set(sample.id, pending);
     }
